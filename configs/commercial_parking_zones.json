@@ -1,0 +1,73 @@
+[
+  {
+    "id": 1,
+    "name": "Slot_A1",
+    "zone": "ZONE_A",
+    "polygon": [[90, 430], [245, 430], [245, 540], [90, 540]],
+    "max_dwell_minutes": 15
+  },
+  {
+    "id": 2,
+    "name": "Slot_A2",
+    "zone": "ZONE_A",
+    "polygon": [[260, 470], [440, 470], [440, 600], [260, 600]],
+    "max_dwell_minutes": 15
+  },
+  {
+    "id": 3,
+    "name": "Slot_A3",
+    "zone": "ZONE_A",
+    "polygon": [[460, 500], [650, 500], [650, 640], [460, 640]],
+    "max_dwell_minutes": 15
+  },
+  {
+    "id": 4,
+    "name": "Slot_A4",
+    "zone": "ZONE_A",
+    "polygon": [[660, 480], [815, 480], [815, 610], [660, 610]],
+    "max_dwell_minutes": 15
+  },
+  {
+    "id": 5,
+    "name": "Slot_A5",
+    "zone": "ZONE_A",
+    "polygon": [[820, 470], [1020, 470], [1020, 610], [820, 610]],
+    "max_dwell_minutes": 15
+  },
+  {
+    "id": 6,
+    "name": "Slot_B1",
+    "zone": "ZONE_B",
+    "polygon": [[820, 390], [960, 390], [960, 470], [820, 470]],
+    "max_dwell_minutes": 15
+  },
+  {
+    "id": 7,
+    "name": "Slot_B2",
+    "zone": "ZONE_B",
+    "polygon": [[970, 390], [1110, 390], [1110, 470], [970, 470]],
+    "max_dwell_minutes": 15
+  },
+  {
+    "id": 8,
+    "name": "Slot_B3",
+    "zone": "ZONE_B",
+    "polygon": [[1120, 390], [1260, 390], [1260, 470], [1120, 470]],
+    "max_dwell_minutes": 15
+  },
+  {
+    "id": 9,
+    "name": "Slot_C1",
+    "zone": "ZONE_C",
+    "polygon": [[200, 340], [330, 340], [330, 420], [200, 420]],
+    "max_dwell_minutes": 15
+  },
+  {
+    "id": 10,
+    "name": "Slot_C2",
+    "zone": "ZONE_C",
+    "polygon": [[340, 340], [470, 340], [470, 420], [340, 420]],
+    "max_dwell_minutes": 15
+  }
+]
+

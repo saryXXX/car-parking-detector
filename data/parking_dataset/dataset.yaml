@@ -1,0 +1,8 @@
+names:
+- vehicle_or_slot
+- parked_vehicle
+- empty_slot
+nc: 3
+path: C:\Users\Sary\Ai_Project\data\parking_dataset
+train: C:\Users\Sary\Ai_Project\data\parking_dataset\images\train
+val: C:\Users\Sary\Ai_Project\data\parking_dataset\images\val

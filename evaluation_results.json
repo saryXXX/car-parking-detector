@@ -1,0 +1,104 @@
+{
+  "total_images": 8,
+  "total_ground_truth": 128,
+  "total_detections": 1,
+  "true_positives": 0,
+  "false_positives": 1,
+  "false_negatives": 128,
+  "precision": 0.0,
+  "recall": 0.0,
+  "f1_score": 0.0,
+  "per_image_results": [
+    {
+      "image": "data/parking_dataset\\images\\val\\parking_sample_000.jpg",
+      "gt_count": 16,
+      "det_count": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 16,
+      "detections": [],
+      "ground_truth_count": 16
+    },
+    {
+      "image": "data/parking_dataset\\images\\val\\parking_sample_005.jpg",
+      "gt_count": 16,
+      "det_count": 1,
+      "tp": 0,
+      "fp": 1,
+      "fn": 16,
+      "detections": [
+        {
+          "box": [
+            280,
+            597,
+            292,
+            628
+          ],
+          "conf": 0.3728705048561096,
+          "cls": 0
+        }
+      ],
+      "ground_truth_count": 16
+    },
+    {
+      "image": "data/parking_dataset\\images\\val\\parking_sample_010.jpg",
+      "gt_count": 16,
+      "det_count": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 16,
+      "detections": [],
+      "ground_truth_count": 16
+    },
+    {
+      "image": "data/parking_dataset\\images\\val\\parking_sample_015.jpg",
+      "gt_count": 16,
+      "det_count": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 16,
+      "detections": [],
+      "ground_truth_count": 16
+    },
+    {
+      "image": "data/parking_dataset\\images\\val\\parking_sample_020.jpg",
+      "gt_count": 16,
+      "det_count": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 16,
+      "detections": [],
+      "ground_truth_count": 16
+    },
+    {
+      "image": "data/parking_dataset\\images\\val\\parking_sample_025.jpg",
+      "gt_count": 16,
+      "det_count": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 16,
+      "detections": [],
+      "ground_truth_count": 16
+    },
+    {
+      "image": "data/parking_dataset\\images\\val\\parking_sample_030.jpg",
+      "gt_count": 16,
+      "det_count": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 16,
+      "detections": [],
+      "ground_truth_count": 16
+    },
+    {
+      "image": "data/parking_dataset\\images\\val\\parking_sample_035.jpg",
+      "gt_count": 16,
+      "det_count": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 16,
+      "detections": [],
+      "ground_truth_count": 16
+    }
+  ]
+}

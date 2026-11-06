@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Weights & models
+*.pt
+*.onnx
+*.engine
+
+# Video datasets (keep folder structure, ignore heavy videos)
+data/raw_videos/*.mp4
+data/raw_videos/*.avi
+data/raw_videos/*.mov
+data/test_unseen/*.mp4
+data/test_unseen/*.avi
+data/test_unseen/*.mov
+!data/raw_videos/.gitkeep
+!data/test_unseen/.gitkeep
+
+# Ultralytics & runs
+runs/
+output/
+*.log
+
+# IDE & Assistants
+.agents/
+.claude/
+.idea/
+.vscode/
+

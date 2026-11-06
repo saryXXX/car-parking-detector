@@ -1,0 +1,20 @@
+# Parking & Aerial Vehicle Dataset Configuration
+# Smart Parking Monitoring & Spatial Analytics
+# 5th Year Computer Science (AU 2026-2027)
+
+path: data/parking_dataset  # dataset root dir
+train: images/train        # train images (relative to 'path')
+val: images/val            # val images (relative to 'path')
+test: images/test          # test images (optional)
+
+# Classes
+names:
+  0: car
+  1: empty_slot
+  2: occupied_slot
+
+# Metadata & Domain Adaptability Attributes:
+# - Target Domains: Pole-mounted surveillance (30°-60°) & Top-down aerial drone (80°-90°)
+# - Lighting Conditions: Daylight, overcast, rain/wet pavement, dusk
+# - Ground Truth Sources: PKLot, CNRPark-EXT, and Aerial Drone Holdout
+
