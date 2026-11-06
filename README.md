@@ -248,5 +248,34 @@ Pour suivre l'avancement phase par phase en toute clarté, chaque étape techniq
    * Export automatique des poids finaux [`models/yolov8n_parking.pt`](file:///C:/Users/Sary/Ai_Project/models/yolov8n_parking.pt).
 
 ---
+
+## 7. Add-on : Classifieur d'occupation par place (CNN)
+
+Détail complet dans [`add-ons-plan.md`](file:///C:/Users/Sary/Ai_Project/add-ons-plan.md) section B. Remplace la règle « point au sol dans le polygone » par un CNN `p(occupied)` par place, fusionné avec la même hystérésis (30 frames, seuils 0.8 / 0.2).
+
+**1. Construire le dataset** (séparation par lot/caméra, jamais par image au hasard) :
+```bash
+python tools/build_slot_dataset.py --source pklot --root data/raw/pklot/PKLot \
+  --out datasets/slots --val-groups UFPR05 --test-groups PUCPR
+```
+
+**2. Entraîner en deux temps :**
+```bash
+yolo classify train data=datasets/slots model=yolo11n-cls.pt imgsz=224 epochs=30 batch=128
+yolo classify train data=datasets/slots_own model=runs/classify/train/weights/best.pt \
+  imgsz=224 epochs=15 lr0=0.001
+```
+
+**3. Évaluer** (règle vs CNN vs fusion) :
+```bash
+python tools/eval_occupancy.py --video <video> --config configs/parking_slots.json \
+  --labels ground_truth.csv --weights runs/classify/train/weights/best.pt
+```
+
+**4. Activer dans l'app :** une fois `runs/classify/train/weights/best.pt` présent, le sélecteur « Occupation : Règles / CNN / Fusion » du popover « Model settings » se débloque automatiquement.
+
+Critère d'acceptation : précision par place ≥ 97 % et moins de changements d'état par place par minute que la règle, sur le lot et la vidéo tenus à l'écart de l'entraînement.
+
+---
 *Ce document couvre 100 % des attendus de la Phase 1 et de la Phase 2 du Cahier des Charges.*
 

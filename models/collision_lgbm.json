@@ -1,0 +1,25 @@
+{
+  "feature_names": [
+    "d",
+    "v_close",
+    "ttc",
+    "ttc_min_1s",
+    "heading_rel",
+    "speed_a",
+    "speed_b",
+    "decel_a",
+    "decel_b",
+    "reversing_a",
+    "reversing_b",
+    "in_aisle_a",
+    "in_aisle_b"
+  ],
+  "labels": [
+    "NORMAL",
+    "NEAR_MISS",
+    "COLLISION"
+  ],
+  "alert_threshold_collision": 0.6,
+  "alert_threshold_near_or_collision": 0.5,
+  "alert_hysteresis_frames": 3
+}

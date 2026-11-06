@@ -24,6 +24,14 @@ data/test_unseen/*.mov
 runs/
 output/
 *.log
+*.err
+
+# Heavy datasets, archives & wheels
+data/raw/
+*.whl
+*.tar.gz
+*.parquet
+!data/sim/traj_small.parquet
 
 # IDE & Assistants
 .agents/

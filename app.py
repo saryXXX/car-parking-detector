@@ -276,6 +276,30 @@ with nav_settings:
         model_choice = model_map[selected_label]
         st.caption(f"Active file: `{model_choice}`")
         conf_thresh = st.slider("YOLO confidence threshold", 0.10, 0.90, 0.25, 0.05, key="conf_thresh")
+        slot_weights_path = "runs/classify/train/weights/best.pt"
+        slot_weights_exist = os.path.exists(slot_weights_path)
+        occupancy_mode_label = st.selectbox(
+            "Occupation : Règles / CNN / Fusion",
+            ["Règles", "CNN", "Fusion"],
+            index=0, key="occupancy_mode_label",
+            disabled=not slot_weights_exist,
+            help=None if slot_weights_exist else
+                 "Entraînez d'abord le classifieur de places (tools/build_slot_dataset.py "
+                 "puis `yolo classify train`) pour activer ce mode.",
+        )
+        occupancy_mode = {"Règles": "rule", "CNN": "cnn", "Fusion": "fusion"}[occupancy_mode_label]
+        collision_weights_path = "models/collision_lgbm.txt"
+        collision_weights_exist = os.path.exists(collision_weights_path)
+        collision_mode_label = st.selectbox(
+            "Collisions : Règles / ML",
+            ["Règles", "ML"],
+            index=0, key="collision_mode_label",
+            disabled=not collision_weights_exist,
+            help=None if collision_weights_exist else
+                 "Entraînez d'abord le modèle (tools/simulate_trajectories.py puis "
+                 "tools/train_collision_model.py) pour activer ce mode.",
+        )
+        collision_mode = {"Règles": "rule", "ML": "ml"}[collision_mode_label]
 
 
 def render_card(ep):
@@ -386,7 +410,19 @@ def run_dashboard():
         st.error(f"Fichier de configuration '{config_file}' introuvable.")
         return
 
-    engine = SpatialEngine(config_path=config_file)
+    slot_classifier = None
+    if occupancy_mode != "rule" and slot_weights_exist:
+        from src.slot_classifier import SlotClassifier
+        slot_classifier = SlotClassifier(slot_weights_path, every_n_frames=3)
+
+    collision_model = None
+    if collision_mode == "ml" and collision_weights_exist:
+        from src.collision_model import CollisionModel
+        collision_model = CollisionModel(collision_weights_path)
+
+    engine = SpatialEngine(config_path=config_file, occupancy_mode=occupancy_mode,
+                            slot_classifier=slot_classifier, collision_mode=collision_mode,
+                            collision_model=collision_model)
     visualizer = ParkingVisualizer(slot_definitions=engine.slots)
 
     tracker = None
@@ -580,7 +616,8 @@ def run_dashboard():
             visualizer.set_dynamic_slots(comp_slots)
 
             tracked = tracker.track(frame)
-            analytics = engine.update(tracked, current_time=curr_time, camera_dx=gmc.camera_dx, camera_dy=gmc.camera_dy)
+            analytics = engine.update(tracked, current_time=curr_time, camera_dx=gmc.camera_dx,
+                                       camera_dy=gmc.camera_dy, frame=frame)
             vis = visualizer.render(frame, analytics, tracked, zone_info=zone_info, fps=30.0)
 
         # KPIs

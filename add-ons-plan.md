@@ -2,10 +2,12 @@
 
 How to add machine learning, deep learning and an LLM to the parts of the project that are still hand-tuned rules: **parking-slot occupancy** and **collision / near-miss detection**.
 
+**Everything in this plan is free:** open datasets, open-source libraries, and open-weight models that run locally on the project laptop (RTX 4060, 8 GB VRAM, 24 GB RAM). No paid API is used anywhere.
+
 Each add-on has:
 - why it exists and what it replaces,
 - step-by-step instructions,
-- a ready-to-paste **prompt for an AI coding assistant** (Claude Code or similar) to implement it,
+- a ready-to-paste **prompt for an AI coding assistant** to implement it,
 - acceptance criteria you can check before moving on.
 
 The add-ons are ordered by dependency: do them in order.
@@ -44,7 +46,7 @@ video frame
    │                                                  │
    └─► keyframes of an alert ─────────────────────────┤
                                                       ▼
-                                         [G] LLM layer (async, off the frame loop)
+                                         [G] local LLM via Ollama (async, off the frame loop)
                                            ├─ G1 verify alert (multimodal)
                                            ├─ G2 French incident report
                                            └─ G3 questions on the history
@@ -429,18 +431,29 @@ Keep each module small and dependency-light (numpy, pandas, lightgbm, shapely).
 
 ---
 
-## G. LLM layer (event level, 2 days)
+## G. LLM layer with a free local model (event level, 2 days)
 
 **Rule:** the LLM never runs per frame. It runs on **events** (seconds of latency are fine) and on **questions**. Detection stays with the vision models.
 
-### Model and API notes
+### Model and runtime
 
-- Python SDK: `pip install anthropic`. Read the key from the `ANTHROPIC_API_KEY` environment variable; never commit it.
-- Default model: `claude-opus-5-5` ($4 / $20 per million input/output tokens). Each alert check is a few images plus a short JSON, so a run with dozens of alerts costs cents. For high-volume use you can switch to `claude-sonnet-5-5` ($2 / $10) or `claude-haiku-5-5` ($0.10 / $0.50); measure on your labelled alerts before switching.
-- Images go in the request as base64 `image` blocks; structured answers come from `client.messages.parse(..., output_format=<Pydantic model>)`, which returns a validated object in `response.parsed_output`.
-- Always check `response.stop_reason` first. On `"refusal"`, keep the vision model's verdict and mark the LLM check as unavailable. Anthropic's server-side fallback (`fallbacks: "default"` with the `server-side-fallback-2026-07-01` beta header) can retry a refused request on another model automatically; see the refusals documentation.
-- Put the long, fixed system prompt first and mark it with `cache_control` so repeated calls reuse it (prompt caching).
-- **Privacy:** keyframes can show faces and number plates. Blur them before sending (OpenCV face detection plus a plate detector, or blur everything outside the two cars' boxes). Mention this in the report: personal data processing in Tunisia falls under the organic law n° 2004-63 on personal data protection.
+- **Runtime: [Ollama](https://ollama.com)**, free and open source. It runs open-weight models on the laptop's GPU and exposes a local HTTP API (`http://localhost:11434`). Nothing leaves the machine, so no account, key or cost is involved.
+- **Model: `qwen3.5:4b`** (Qwen3.5, open weights, about 3.3–4 GB). It is the newest Qwen family, natively multimodal (reads images and text), writes good French, and handles all three tasks below, so only one model has to be downloaded. At this size it leaves room on the RTX 4060's 8 GB for YOLO running at the same time. Qwen3.5 "thinks" before answering by default; pass `think=False` for these short structured tasks to keep them fast.
+- **Bigger option:** `qwen3.5:9b` (about 6.6–7.6 GB) is stronger but nearly fills the 8 GB, so only use it when YOLO is not running (for example, for reports written after a run).
+- **Alternatives to compare** (also free on Ollama): `qwen3-vl:4b` / `qwen3-vl:8b` (the previous Qwen vision models, 3.3 / 6.2 GB; may not show in the Ollama app's model picker but `ollama pull` works), `gemma3:4b` (vision, multilingual).
+- **Setup:** keep Ollama up to date (Qwen3.5 needs a recent release).
+  ```bash
+  # 1. install Ollama for Windows from https://ollama.com/download, then:
+  ollama pull qwen3.5:4b
+  ollama run qwen3.5:4b "Bonjour, réponds en une phrase."   # smoke test
+  # 2. Python client
+  pip install ollama pydantic
+  ```
+- **Structured answers:** pass a Pydantic schema as `format=Model.model_json_schema()` and set `options={"temperature": 0}`; Ollama constrains the output to that JSON schema, and you validate it with `Model.model_validate_json(response.message.content)`.
+- **Images:** pass file paths (or bytes) in the message's `images` list.
+- **Speed:** expect a few seconds per alert check on the 4060, which is fine because it runs in a background thread. Unload the model when a run ends (`keep_alive=0` on the last call) to give the GPU back to YOLO.
+- **Honest limits:** a small local model is weaker than the large commercial models. That is why G1 is evaluated on hand-labelled alerts before it is trusted, and why it can only tag alerts, never hide them.
+- **Privacy:** because the model runs locally, keyframes never leave the laptop, which is a strong argument for the defence. Still blur faces and plates in the keyframes you **store** (`data/events/`). Personal data processing in Tunisia falls under the organic law n° 2004-63 on personal data protection.
 
 ### G1. Alert verification (multimodal second opinion)
 
@@ -482,15 +495,15 @@ Write the explanation in French, two sentences at most, naming the visual eviden
 **Code**
 
 ```python
-import base64
 from pathlib import Path
 from typing import Literal
 
-import anthropic
-from pydantic import BaseModel, Field
+from ollama import Client, ResponseError
+from pydantic import BaseModel, Field, ValidationError
 
+MODEL = "qwen3.5:4b"
 SYSTEM_PROMPT = Path("prompts/alert_review_system.txt").read_text(encoding="utf-8")
-client = anthropic.Anthropic()
+client = Client(host="http://localhost:11434")
 
 
 class AlertVerdict(BaseModel):
@@ -502,26 +515,26 @@ class AlertVerdict(BaseModel):
 
 
 def review_alert(keyframe_paths: list[Path], event_json: str) -> AlertVerdict | None:
-    content = []
-    for p in keyframe_paths:
-        content.append({
-            "type": "image",
-            "source": {"type": "base64", "media_type": "image/jpeg",
-                       "data": base64.standard_b64encode(p.read_bytes()).decode()},
-        })
-    content.append({"type": "text", "text": f"Événement à vérifier :\n{event_json}"})
-
-    response = client.messages.parse(
-        model="claude-opus-5-5",
-        max_tokens=2000,
-        system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
-        messages=[{"role": "user", "content": content}],
-        output_format=AlertVerdict,
-    )
-    if response.stop_reason == "refusal":
+    try:
+        response = client.chat(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user",
+                 "content": f"Événement à vérifier :\n{event_json}",
+                 "images": [str(p) for p in keyframe_paths]},
+            ],
+            format=AlertVerdict.model_json_schema(),
+            think=False,
+            options={"temperature": 0},
+        )
+        return AlertVerdict.model_validate_json(response.message.content)
+    except (ResponseError, ValidationError, ConnectionError) as exc:
+        print(f"LLM review unavailable: {exc}")
         return None
-    return response.parsed_output
 ```
+
+Small local models handle five images less reliably than one. If verdicts are erratic, tile the 5 keyframes into one image strip (`np.hstack` after resizing each to 384 px high) with the frame time written on each tile, and send that single image.
 
 **Evaluate G1 before relying on it:** collect 100+ logged alerts, label them by hand, and measure how many false alarms the LLM removes and how many true collisions it wrongly dismisses. A dismissed true collision is the costly error: if it happens, use the LLM verdict only to add a "probable false alarm" tag, never to hide an alert.
 
@@ -554,14 +567,14 @@ Format exact :
 **Action recommandée :** une phrase (ex. vérifier les images, dégager la voie, aucune).
 ```
 
-Call it with `client.messages.create(model="claude-opus-5-5", max_tokens=2000, system=..., messages=[{"role": "user", "content": event_json}])` and store the text in `events.llm_report`. Add a "Rapport" button per alert in the dashboard, and an export of all reports of a run as one Markdown file.
+Call it with `client.chat(model="qwen3.5:4b", think=False, messages=[{"role": "system", "content": REPORT_PROMPT}, {"role": "user", "content": event_json}], options={"temperature": 0.2})` and store `response.message.content` in `events.llm_report`. Check every report against its JSON during evaluation: small models occasionally invent details, which is why the prompt forbids it and asks for « non déterminé ». Add a "Rapport" button per alert in the dashboard, and an export of all reports of a run as one Markdown file.
 
 ### G3. Questions on the history (text-to-SQL, read-only)
 
 Examples: « Combien de dépassements de durée hier après 14 h ? », « Quelle place est la plus occupée cette semaine ? », « Liste les quasi-collisions de la vidéo 2 ».
 
 Design for safety:
-1. The model writes **one SQL `SELECT`** for the schema of section D (given in the system prompt).
+1. The model writes **one SQL `SELECT`** for the schema of section D (given in the system prompt). Ask for it as JSON with `format={"type": "object", "properties": {"sql": {"type": "string"}}, "required": ["sql"]}` so there is no extra text to strip.
 2. Your code validates it: a single statement starting with `SELECT`, no `;` inside, only the three known tables. It runs on a connection opened read-only (`sqlite3.connect("file:data/events.db?mode=ro", uri=True)`), with a row limit and a 2 s timeout.
 3. The rows go back to the model, which answers in French and shows the query it used.
 
@@ -584,32 +597,39 @@ show the SQL you used in a code block. If the rows cannot answer the question, s
 **Prompt for the coding assistant (G1–G3)**
 
 ```text
-Add an LLM layer to the Smart Parking app using the official Anthropic Python SDK
-(pip install anthropic; key from the ANTHROPIC_API_KEY env var; model "claude-opus-5-5").
+Add an LLM layer to the Smart Parking app using a FREE LOCAL model through Ollama.
+Do not use any paid or cloud API. Use the official `ollama` Python package
+(pip install ollama), host http://localhost:11434, model name read from the env var
+PARKING_LLM_MODEL with default "qwen3.5:4b" (pass think=False on every call).
 
 1. Save the three system prompts from add-ons-plan.md section G as
    prompts/alert_review_system.txt, prompts/incident_report_system.txt and
    prompts/history_qa_system.txt.
 2. src/llm_reviewer.py:
-   - review_alert(event_id): load data/events/<id>/*.jpg (5 keyframes), blur everything
-     outside the two vehicles' boxes plus any detected face, call client.messages.parse with
-     the AlertVerdict Pydantic model shown in the plan, store verdict/confidence/explanation
-     in the events table. Check stop_reason == "refusal" first and store "unavailable".
+   - is_available() -> bool: True when the Ollama server answers and the model is pulled
+     (client.list()); cache the result for 60 s.
+   - review_alert(event_id): load data/events/<id>/*.jpg (5 keyframes, already blurred when
+     saved), call client.chat with role "system" + a user message carrying the event JSON and
+     the image paths in "images", format=AlertVerdict.model_json_schema(),
+     options={"temperature": 0}; validate with AlertVerdict.model_validate_json and store
+     verdict/confidence/explanation in the events table. Add a --tile option that merges the
+     5 frames into one horizontal strip before sending.
    - write_report(event_id): build the event JSON (plus the verdict if present), call
-     client.messages.create with the report system prompt, store events.llm_report.
-   - ask_history(question): two-step text-to-SQL. Validate that the SQL is a single SELECT
-     on the known tables, run it on a read-only sqlite URI connection with a 200-row limit
-     and a 2 s timeout, then send the rows back for the French answer. Return
-     (answer, sql, rows).
-   - Mark the system prompts with cache_control {"type": "ephemeral"}.
-   - Catch anthropic.RateLimitError, APIConnectionError and APIStatusError separately;
-     never let an LLM failure stop the video loop.
-3. Run review_alert in a background thread (concurrent.futures.ThreadPoolExecutor, 2 workers)
-   so the dashboard never waits on the API.
+     client.chat with the report system prompt, temperature 0.2, store events.llm_report.
+   - ask_history(question): two-step text-to-SQL. Step 1 asks for {"sql": "..."} via the
+     format parameter. Validate that the SQL is a single SELECT on the known tables, run it on
+     a read-only sqlite URI connection with a 200-row limit and a 2 s timeout, then send the
+     rows back for the French answer. Return (answer, sql, rows).
+   - Catch ollama.ResponseError, pydantic.ValidationError and connection errors separately;
+     never let an LLM failure stop the video loop. On the last call of a run pass
+     keep_alive=0 to free the GPU.
+3. Run review_alert in a background thread (concurrent.futures.ThreadPoolExecutor, 1 worker,
+   because the GPU is shared with YOLO) so the dashboard never waits on the model.
 4. In app.py: next to each alert, show the LLM verdict badge when available ("Confirmé",
    "Fausse alerte probable", "Incertain"); add a "Rapport" button per alert that shows
-   write_report's output; add a sidebar or popover "Questions" text box calling ask_history.
-   Hide all LLM features when ANTHROPIC_API_KEY is not set, with a one-line explanation.
+   write_report's output; add a popover "Questions" text box calling ask_history.
+   When is_available() is False, hide the LLM features and show one line:
+   "Assistant IA local indisponible : lancez Ollama puis `ollama pull qwen3.5:4b`."
 5. tools/eval_llm_review.py: given a CSV of hand labels (event_id, true_label), run
    review_alert on each and print the confusion matrix and the number of true collisions
    dismissed.
@@ -670,15 +690,18 @@ Between two people, this matches the deck's split: student 1 takes A, C, E, F (v
 | Homography wrong on a sloped lot | Check the reprojection error at load time; use 6+ points spread over the whole view |
 | Slot CNN fails at night | PKLot is daylight-only; include CNRPark-EXT and your own evening clips, or state the limitation |
 | LLM dismisses a real collision | The LLM only tags alerts and never hides them; measure dismissed true collisions (G1 evaluation) |
-| API cost or outage | LLM features are optional, asynchronous, and disabled without a key |
-| Privacy | Blur faces and plates before any API call; keep keyframes local; mention law n° 2004-63 in the report |
+| Local model too slow, or GPU shared with YOLO | One background worker; `qwen3.5:4b` by default (`qwen3.5:2b` if still too heavy); unload with `keep_alive=0`; LLM features are optional and hidden when Ollama is not running |
+| Small model invents details in reports | Temperature 0–0.2, « non déterminé » rule in the prompt, spot-check reports against their JSON |
+| Privacy | The model runs locally, so frames never leave the laptop; blur faces and plates in stored keyframes; mention law n° 2004-63 in the report |
 
 ---
 
 ## L. Dependencies
 
 ```bash
-pip install lightgbm pyarrow shapely anthropic pydantic
+pip install lightgbm pyarrow shapely ollama pydantic
+# local LLM runtime (free): install Ollama from https://ollama.com/download, then
+ollama pull qwen3.5:4b
 # optional sequence models
 pip install torch torchvision
 ```
@@ -709,12 +732,12 @@ Machine learning
 - Ke, G. et al. (2017). *LightGBM: A Highly Efficient Gradient Boosting Decision Tree.* NeurIPS 30. https://proceedings.neurips.cc/paper/2017/file/6449f44a102fde848669bdd9eb6b76fa-Paper.pdf
 - Alahi, A. et al. (2016). *Social LSTM: Human Trajectory Prediction in Crowded Spaces.* CVPR 2016, 961–971. https://openaccess.thecvf.com/content_cvpr_2016/html/Alahi_Social_LSTM_Human_CVPR_2016_paper.html
 
-LLM (Anthropic documentation)
-- Models and pricing: https://platform.claude.com/docs/en/about-claude/models/overview
-- Vision (image input, formats, limits): https://platform.claude.com/docs/en/build-with-claude/vision
-- Structured outputs: https://platform.claude.com/docs/en/build-with-claude/structured-outputs
-- Prompt caching: https://platform.claude.com/docs/en/build-with-claude/prompt-caching
-- Refusals and fallback: https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback
+Local LLM (free, open weights)
+- Ollama, download and docs: https://ollama.com/download · https://docs.ollama.com
+- Ollama structured outputs (JSON schema via `format`, vision example): https://docs.ollama.com/capabilities/structured-outputs · announcement: https://ollama.com/blog/structured-outputs
+- Qwen3.5 on Ollama (0.8B–122B, text + image, thinking toggle; 4B ≈ 3.3–4 GB, 9B ≈ 6.6–7.6 GB): https://ollama.com/library/qwen3.5
+- Qwen3-VL on Ollama (alternative; 4B ≈ 3.3 GB, 8B ≈ 6.2 GB): https://ollama.com/library/qwen3-vl
+- Ollama Python library: https://github.com/ollama/ollama-python
 
 Background already cited in the Phase 1 deck
 - Shoup, D. (2006). *Cruising for parking.* Transport Policy 13(6), 479–486 (the ~30% of downtown traffic figure).

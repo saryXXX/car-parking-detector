@@ -30,7 +30,11 @@ class SpatialEngine:
         obstruction_threshold_sec: float = 2.5,
         collision_dist_threshold: float = 75.0,
         near_miss_dist_threshold: float = 120.0,
-        fps: float = 30.0
+        fps: float = 30.0,
+        occupancy_mode: str = "rule",
+        slot_classifier: Optional[object] = None,
+        collision_mode: str = "rule",
+        collision_model: Optional[object] = None
     ):
         self.config_path = config_path
         self.hysteresis_window = hysteresis_window
@@ -40,6 +44,13 @@ class SpatialEngine:
         self.collision_dist_threshold = collision_dist_threshold
         self.near_miss_dist_threshold = near_miss_dist_threshold
         self.fps = fps
+        assert occupancy_mode in ("rule", "cnn", "fusion")
+        self.occupancy_mode = occupancy_mode
+        self.slot_classifier = slot_classifier
+        assert collision_mode in ("rule", "ml")
+        self.collision_mode = collision_mode
+        self.collision_model = collision_model
+        self.ml_pair_distance_px = 8.0 * 75.0  # 8 m, at the 75px == 1.0m fallback scale (add-on A will replace this)
 
         self.slots = []
         self._load_config()
@@ -106,13 +117,21 @@ class SpatialEngine:
         tracked_vehicles: List[Dict],
         current_time: Optional[float] = None,
         camera_dx: float = 0.0,
-        camera_dy: float = 0.0
+        camera_dy: float = 0.0,
+        frame: Optional[np.ndarray] = None
     ) -> Dict:
         if current_time is None:
             current_time = time.time()
 
         # Filtrer uniquement les places visibles si l'attribut is_visible existe
         active_slots = [s for s in self.slots if s.get("is_visible", True)]
+
+        # p(occupied) per slot from the CNN classifier, batched once per update().
+        # Only computed when a frame is supplied and mode requires it; the classifier
+        # itself caches across every_n_frames, so this stays cheap.
+        p_cnn: Dict[int, float] = {}
+        if self.occupancy_mode in ("cnn", "fusion") and self.slot_classifier is not None and frame is not None:
+            p_cnn = self.slot_classifier.predict(frame, active_slots)
 
         instant_assignments: Dict[int, Optional[int]] = {s["id"]: None for s in active_slots}
         cars_in_slots = set()
@@ -163,7 +182,14 @@ class SpatialEngine:
             sid = slot["id"]
             car_id = instant_assignments.get(sid, None)
             is_present = car_id is not None
-            self.history[sid].append(is_present)
+
+            if self.occupancy_mode == "rule" or sid not in p_cnn:
+                push_value = float(is_present)
+            elif self.occupancy_mode == "cnn":
+                push_value = p_cnn[sid]
+            else:  # fusion
+                push_value = 0.6 * p_cnn[sid] + 0.4 * float(is_present)
+            self.history[sid].append(push_value)
 
             ratio = sum(self.history[sid]) / len(self.history[sid])
             prev_state = self.occupancy_state.get(sid, False)
@@ -258,6 +284,35 @@ class SpatialEngine:
         # RÈGLE 2 : Rapprochement fenêtré sur 8 à 15 frames (Delta d <= -20px sur 0.3s).
         collision_alerts = []
         n_veh = len(tracked_vehicles)
+
+        if self.collision_mode == "ml" and self.collision_model is not None:
+            for veh in tracked_vehicles:
+                self.collision_model.update_track(veh["id"], veh["bbox"], current_time)
+            close_pairs = []
+            for i in range(n_veh):
+                for j in range(i + 1, n_veh):
+                    v1, v2 = tracked_vehicles[i], tracked_vehicles[j]
+                    b1, b2 = v1["bbox"], v2["bbox"]
+                    cx1, cy1 = (b1[0] + b1[2]) / 2.0, (b1[1] + b1[3]) / 2.0
+                    cx2, cy2 = (b2[0] + b2[2]) / 2.0, (b2[1] + b2[3]) / 2.0
+                    if np.hypot(cx1 - cx2, cy1 - cy2) < self.ml_pair_distance_px:
+                        close_pairs.append((v1["id"], v2["id"]))
+            ml_alerts = self.collision_model.predict(close_pairs, fps=self.fps, t=current_time)
+            veh_by_id = {v["id"]: v for v in tracked_vehicles}
+            for a in ml_alerts:
+                v1, v2 = veh_by_id.get(a["car1_id"]), veh_by_id.get(a["car2_id"])
+                if v1 is None or v2 is None:
+                    continue
+                b1, b2 = v1["bbox"], v2["bbox"]
+                cx = int((b1[0] + b1[2] + b2[0] + b2[2]) / 4)
+                cy = int((b1[1] + b1[3] + b2[1] + b2[3]) / 4)
+                collision_alerts.append({
+                    "type": a["type"], "car1_id": a["car1_id"], "car2_id": a["car2_id"],
+                    "dist": a["distance_m"] * 75.0,  # back to pixel-equivalent for display parity
+                    "closing_speed": None, "pos": (cx, cy), "source": "ml",
+                    "p_collision": a["p_collision"], "ttc_s": a["ttc_s"],
+                })
+            n_veh = 0  # skip the rule loop below entirely in ml mode
 
         for i in range(n_veh):
             for j in range(i + 1, n_veh):
