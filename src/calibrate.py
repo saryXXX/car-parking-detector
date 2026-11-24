@@ -11,9 +11,13 @@ import numpy as np
 
 
 class ParkingCalibrator:
-    def __init__(self, source_path: str = None, output_path: str = "configs/parking_slots.json"):
+    def __init__(self, source_path: str = None, output_path: str = "configs/parking_slots.json",
+                 ref_metres: float = None):
         self.source_path = source_path
         self.output_path = output_path
+        self.ref_metres = ref_metres        # real-world length of the 2-click reference line, if given
+        self.px_per_metre = None            # computed once the reference line is drawn
+        self.ref_points = []                # the 2 clicked points for the reference line
         self.slots = []          # List of saved slots: [{"id": 1, "name": "Slot_01", "polygon": [...]}]
         self.current_points = [] # Current polygon being drawn: [(x, y), ...]
         self.frame = None
@@ -27,7 +31,12 @@ class ParkingCalibrator:
         if os.path.exists(self.output_path):
             try:
                 with open(self.output_path, "r", encoding="utf-8") as f:
-                    self.slots = json.load(f)
+                    raw = json.load(f)
+                if isinstance(raw, dict) and "slots" in raw:
+                    self.slots = raw["slots"]
+                    self.px_per_metre = raw.get("px_per_metre")
+                else:
+                    self.slots = raw
                 print(f"[INFO] {len(self.slots)} place(s) existante(s) chargee(s) depuis '{self.output_path}'.")
             except Exception as e:
                 print(f"[WARN] Impossible de charger '{self.output_path}': {e}")
@@ -76,6 +85,15 @@ class ParkingCalibrator:
 
     def mouse_callback(self, event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
+            if self.ref_metres and self.px_per_metre is None:
+                self.ref_points.append([int(x), int(y)])
+                print(f"[REF] Point #{len(self.ref_points)} ajoute : ({x}, {y})")
+                if len(self.ref_points) == 2:
+                    (x1, y1), (x2, y2) = self.ref_points
+                    px_dist = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+                    self.px_per_metre = px_dist / self.ref_metres
+                    print(f"[REF] {px_dist:.1f}px = {self.ref_metres}m -> echelle = {self.px_per_metre:.2f} px/m")
+                return
             self.current_points.append([int(x), int(y)])
             print(f"[POINT] Coin #{len(self.current_points)} ajoute : ({x}, {y})")
 
@@ -93,6 +111,19 @@ class ParkingCalibrator:
                 self.current_points.clear()
 
     def draw_hud(self, img: np.ndarray):
+        # Reference line for real-world scale (if requested)
+        if self.ref_metres:
+            for pt in self.ref_points:
+                cv2.circle(img, tuple(pt), 6, (255, 0, 255), -1)
+            if len(self.ref_points) == 2:
+                cv2.line(img, tuple(self.ref_points[0]), tuple(self.ref_points[1]), (255, 0, 255), 2, cv2.LINE_AA)
+            if self.px_per_metre:
+                cv2.putText(img, f"Echelle: {self.px_per_metre:.1f} px/m", (15, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 255), 2, cv2.LINE_AA)
+            elif len(self.ref_points) < 2:
+                cv2.putText(img, f"Cliquez 2 points separes de {self.ref_metres}m (ex: largeur de place)",
+                            (15, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2, cv2.LINE_AA)
+
         # Draw all saved slots
         for slot in self.slots:
             pts = np.array(slot["polygon"], np.int32).reshape((-1, 1, 2))
@@ -125,9 +156,13 @@ class ParkingCalibrator:
 
     def save_to_json(self):
         os.makedirs(os.path.dirname(self.output_path), exist_ok=True)
+        payload = self.slots
+        if self.px_per_metre:
+            payload = {"px_per_metre": round(self.px_per_metre, 3), "slots": self.slots}
         with open(self.output_path, "w", encoding="utf-8") as f:
-            json.dump(self.slots, f, indent=2, ensure_ascii=False)
-        print(f"[OK] Configuration sauvegardee avec succes dans : '{self.output_path}' ({len(self.slots)} places).")
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+        scale_note = f", echelle {self.px_per_metre:.1f} px/m" if self.px_per_metre else ""
+        print(f"[OK] Configuration sauvegardee avec succes dans : '{self.output_path}' ({len(self.slots)} places{scale_note}).")
 
     def run(self):
         self.load_frame()
@@ -160,6 +195,10 @@ class ParkingCalibrator:
                 elif self.slots:
                     removed_slot = self.slots.pop()
                     print(f"[UNDO] Place retiree : {removed_slot['name']}")
+                elif self.ref_points:
+                    self.ref_points.pop()
+                    self.px_per_metre = None
+                    print("[UNDO] Point de reference retire")
             elif key == ord('c'): # Clear current slot points
                 self.current_points.clear()
                 print("[CLEAR] Points en cours effaces.")
@@ -175,8 +214,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Outil de calibration interactif des places de parking.")
     parser.add_argument("--source", type=str, default=None, help="Chemin vers une video ou image de reference.")
     parser.add_argument("--output", type=str, default="configs/parking_slots.json", help="Chemin du fichier JSON de sortie.")
+    parser.add_argument("--ref-metres", type=float, default=None,
+                         help="Distance reelle (en metres) entre les 2 premiers points cliques "
+                              "(ex: largeur d'une place ~2.5m), pour calibrer px/m pour le modele de collision ML.")
     args = parser.parse_args()
 
-    calibrator = ParkingCalibrator(source_path=args.source, output_path=args.output)
+    calibrator = ParkingCalibrator(source_path=args.source, output_path=args.output, ref_metres=args.ref_metres)
     calibrator.run()
 

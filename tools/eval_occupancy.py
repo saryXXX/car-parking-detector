@@ -23,6 +23,7 @@ import cv2
 
 from src.slot_classifier import SlotClassifier
 from src.spatial_engine import SpatialEngine
+from src.tracker import VehicleTracker
 
 
 def load_labels(path):
@@ -33,7 +34,7 @@ def load_labels(path):
     return by_frame
 
 
-def run_mode(video_path, config_path, labels, mode, weights):
+def run_mode(video_path, config_path, labels, mode, weights, tracker):
     classifier = SlotClassifier(weights, every_n_frames=1) if mode != "rule" and weights else None
     engine = SpatialEngine(config_path=config_path, occupancy_mode=mode, slot_classifier=classifier)
 
@@ -49,9 +50,7 @@ def run_mode(video_path, config_path, labels, mode, weights):
         ok, frame = cap.read()
         if not ok:
             break
-        # NOTE: tracked_vehicles would normally come from YOLO+ByteTrack; for this
-        # evaluation harness, plug in your tracker's output here per frame.
-        tracked_vehicles = get_tracked_vehicles_for_frame(frame_idx)
+        tracked_vehicles = tracker.track(frame)
         result = engine.update(tracked_vehicles, current_time=frame_idx / fps, frame=frame)
 
         for sid, state in engine.occupancy_state.items():
@@ -80,13 +79,6 @@ def run_mode(video_path, config_path, labels, mode, weights):
                 flips_per_slot_per_min=flips_per_min)
 
 
-def get_tracked_vehicles_for_frame(frame_idx):
-    """Placeholder: wire this to src/tracker.py output for your evaluation video."""
-    raise NotImplementedError(
-        "Plug in your tracker's per-frame output here (list of {'id', 'bbox'} dicts)."
-    )
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--video", required=True)
@@ -94,6 +86,7 @@ def main():
     ap.add_argument("--labels", required=True)
     ap.add_argument("--weights", default=None, help="Classifier weights for cnn/fusion modes")
     ap.add_argument("--modes", nargs="*", default=["rule", "cnn", "fusion"])
+    ap.add_argument("--vehicle-model", default="yolov8n.pt", help="YOLO weights for vehicle tracking")
     args = ap.parse_args()
 
     labels = load_labels(args.labels)
@@ -102,7 +95,10 @@ def main():
         if mode != "rule" and not args.weights:
             print(f"[skip] mode={mode} needs --weights")
             continue
-        rows.append(run_mode(args.video, args.config, labels, mode, args.weights))
+        # Fresh tracker per mode: ByteTrack keeps internal state across frames,
+        # and each mode re-reads the video from frame 0.
+        tracker = VehicleTracker(model_name=args.vehicle_model)
+        rows.append(run_mode(args.video, args.config, labels, mode, args.weights, tracker))
 
     print("\n| mode | n | accuracy | precision | recall | f1 | flips/slot/min |")
     print("|---|---|---|---|---|---|---|")

@@ -17,7 +17,10 @@ import numpy as np
 
 
 class CameraMotionCompensator:
-    def __init__(self, max_features: int = 500):
+    def __init__(self, max_features: int = 500, proc_width: int = 640):
+        # Features are matched on a downscaled copy (ORB on 1280 px was ~45 ms/frame); the
+        # homography is rescaled back to full-frame coordinates.
+        self.proc_width = proc_width
         self.orb = cv2.ORB_create(nfeatures=max_features)
         self.bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
         self.prev_gray: Optional[np.ndarray] = None
@@ -33,41 +36,64 @@ class CameraMotionCompensator:
         self.total_dx = 0.0
         self.total_dy = 0.0
 
+    # Minimum RANSAC inliers for a homography to be trusted.
+    MIN_INLIERS = 25
+
+    def _match_homography(self, kp_a, des_a, kp_b, des_b) -> Optional[np.ndarray]:
+        """Homography mapping points of image A onto image B, or None if unreliable."""
+        if des_a is None or des_b is None or len(des_a) < 10 or len(des_b) < 10:
+            return None
+        matches = sorted(self.bf.match(des_a, des_b), key=lambda m: m.distance)[:200]
+        if len(matches) < 8:
+            return None
+        src = np.float32([kp_a[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
+        dst = np.float32([kp_b[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
+        H, mask = cv2.findHomography(src, dst, cv2.RANSAC, 3.0)
+        if H is None or mask is None or int(mask.sum()) < self.MIN_INLIERS:
+            return None
+        return H
+
     def update(self, frame: np.ndarray) -> np.ndarray:
         """
-        Processes a new frame, computes camera motion step, and accumulates global homography.
+        Estimates the homography frame0 -> current frame.
+
+        Each frame is matched against a fixed KEYFRAME (not the previous frame): chaining
+        frame-to-frame steps loses slow drift entirely -- a hovering drone drifting ~0.1 px per
+        frame produced per-step homographies of ~identity and an accumulated motion of 0,
+        while the ground had actually moved 15-25 px. The keyframe is only replaced when the
+        view has moved too far to match it reliably (handheld pans), at which point we chain
+        once from the previous frame and re-anchor.
         """
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        s = min(1.0, self.proc_width / gray.shape[1])
+        small = cv2.resize(gray, None, fx=s, fy=s, interpolation=cv2.INTER_AREA) if s < 1.0 else gray
+        kp, des = self.orb.detectAndCompute(small, None)
+        self._S = np.diag([s, s, 1.0])
+        self._S_inv = np.diag([1.0 / s, 1.0 / s, 1.0])
 
         if self.prev_gray is None:
-            self.prev_gray = gray
-            self.prev_kp, self.prev_des = self.orb.detectAndCompute(gray, None)
+            self.prev_gray, self.prev_kp, self.prev_des = gray, kp, des
+            self.key_kp, self.key_des, self.key_H = kp, des, self.accumulated_H.copy()
             return self.accumulated_H
 
-        kp, des = self.orb.detectAndCompute(gray, None)
+        prev_total = (self.total_dx, self.total_dy)
+        H_key = self._match_homography(self.key_kp, self.key_des, kp, des)
+        to_full = lambda H: self._S_inv @ H @ self._S  # small-image homography -> full frame
+        if H_key is not None:
+            new_H = to_full(H_key) @ self.key_H
+        else:
+            # Lost the keyframe: chain one step from the previous frame and re-anchor on it.
+            H_step = self._match_homography(self.prev_kp, self.prev_des, kp, des)
+            new_H = (to_full(H_step) @ self.accumulated_H) if H_step is not None else self.accumulated_H
+            self.key_kp, self.key_des, self.key_H = kp, des, new_H.copy()
 
-        if des is not None and self.prev_des is not None and len(des) > 10 and len(self.prev_des) > 10:
-            matches = self.bf.match(self.prev_des, des)
-            matches = sorted(matches, key=lambda x: x.distance)[:120]
+        self.accumulated_H = new_H.astype(np.float32)
+        self.total_dx = float(self.accumulated_H[0, 2])
+        self.total_dy = float(self.accumulated_H[1, 2])
+        self.camera_dx = self.total_dx - prev_total[0]
+        self.camera_dy = self.total_dy - prev_total[1]
 
-            if len(matches) >= 8:
-                src_pts = np.float32([self.prev_kp[m.queryIdx].pt for m in matches]).reshape(-1, 1, 2)
-                dst_pts = np.float32([kp[m.trainIdx].pt for m in matches]).reshape(-1, 1, 2)
-
-                H_step, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 4.0)
-
-                if H_step is not None:
-                    # Instantaneous displacement
-                    self.camera_dx = float(H_step[0, 2])
-                    self.camera_dy = float(H_step[1, 2])
-                    # Accumulate transformation
-                    self.accumulated_H = np.dot(H_step, self.accumulated_H)
-                    self.total_dx = float(self.accumulated_H[0, 2])
-                    self.total_dy = float(self.accumulated_H[1, 2])
-
-        self.prev_gray = gray
-        self.prev_kp = kp
-        self.prev_des = des
+        self.prev_gray, self.prev_kp, self.prev_des = gray, kp, des
         return self.accumulated_H
 
     def get_active_zone_info(self) -> Dict:
@@ -106,18 +132,22 @@ class CameraMotionCompensator:
         Applies camera motion compensation to parking slot polygons.
         Automatically tags out-of-bounds slots as is_visible=False so they don't persist on screen.
         """
+        if not slot_definitions:
+            return []
+        # One perspectiveTransform for every vertex of every slot (240-slot lots: one call
+        # instead of 240), then split back per slot.
+        polys = [np.asarray(s["polygon"], dtype=np.float32).reshape(-1, 2) for s in slot_definitions]
+        sizes = [len(p) for p in polys]
+        warped = cv2.perspectiveTransform(np.concatenate(polys).reshape(-1, 1, 2),
+                                          self.accumulated_H).reshape(-1, 2).astype(np.int32)
         compensated_slots = []
-        for slot in slot_definitions:
-            poly = np.array(slot["polygon"], dtype=np.float32).reshape(-1, 1, 2)
-            transformed = cv2.perspectiveTransform(poly, self.accumulated_H)
-            new_poly = [[int(pt[0][0]), int(pt[0][1])] for pt in transformed]
-
-            # Compute centroid
-            cx = int(np.mean([p[0] for p in new_poly]))
-            cy = int(np.mean([p[1] for p in new_poly]))
+        for slot, pts in zip(slot_definitions, np.split(warped, np.cumsum(sizes)[:-1])):
+            new_poly = pts.tolist()
+            cx, cy = (int(v) for v in pts.mean(axis=0))
 
             # Check if at least 2 vertices are inside the active frame viewport
-            in_view_pts = sum(1 for p in new_poly if 0 <= p[0] <= frame_width and 0 <= p[1] <= frame_height)
+            in_view_pts = int(((pts[:, 0] >= 0) & (pts[:, 0] <= frame_width) &
+                               (pts[:, 1] >= 0) & (pts[:, 1] <= frame_height)).sum())
             is_visible = (in_view_pts >= 2) and (-100 <= cx <= frame_width + 100) and (-100 <= cy <= frame_height + 100)
 
             compensated_slots.append({

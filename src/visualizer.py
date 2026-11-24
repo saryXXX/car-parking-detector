@@ -106,9 +106,19 @@ class ParkingVisualizer:
         for v in tracked_vehicles:
             x1, y1, x2, y2 = map(int, v["bbox"])
             px, py = int((x1 + x2) / 2), y2
+            mask = v.get("mask")
 
-            # Rectangle véhicule fin et élégant
-            cv2.rectangle(vis_frame, (x1, y1), (x2, y2), (220, 200, 100), 1, cv2.LINE_AA)
+            if mask:
+                # Real pixel silhouette from instance segmentation, not just the bbox.
+                pts = np.array(mask, np.int32).reshape((-1, 1, 2))
+                cv2.polylines(vis_frame, [pts], True, (220, 200, 100), 2, cv2.LINE_AA)
+                mask_overlay = vis_frame.copy()
+                cv2.fillPoly(mask_overlay, [pts], (220, 200, 100))
+                cv2.addWeighted(mask_overlay, 0.25, vis_frame, 0.75, 0, vis_frame)
+            else:
+                # Rectangle véhicule fin et élégant
+                cv2.rectangle(vis_frame, (x1, y1), (x2, y2), (220, 200, 100), 1, cv2.LINE_AA)
+
             # Point de contact au sol
             cv2.circle(vis_frame, (px, py), 3, self.COLOR_DOT, -1, cv2.LINE_AA)
             # Badge identifiant discret

@@ -1,41 +1,65 @@
-# Python
+# ───────────────────────── Python ─────────────────────────
 __pycache__/
 *.py[cod]
 *$py.class
 venv/
+.venv/
+env/
 .env
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
 
-# Weights & models
+# ─────────────────────── Weights & models ───────────────────────
+# Weights are downloaded/trained locally (see README → Models)
 *.pt
+*.pth
 *.onnx
 *.engine
+*.tflite
 
-# Video datasets (keep folder structure, ignore heavy videos)
-data/raw_videos/*.mp4
-data/raw_videos/*.avi
-data/raw_videos/*.mov
-data/test_unseen/*.mp4
-data/test_unseen/*.avi
-data/test_unseen/*.mov
+# ─────────────────────────── Videos ───────────────────────────
+# Heavy source videos stay local; small demo clips live in assets/
+/*.mp4
+/*.avi
+/*.mov
+data/raw_videos/*
+data/test_unseen/*
 !data/raw_videos/.gitkeep
 !data/test_unseen/.gitkeep
 
-# Ultralytics & runs
-runs/
-output/
-*.log
-*.err
-
-# Heavy datasets, archives & wheels
-data/raw/
-*.whl
-*.tar.gz
+# ────────────────────── Datasets & caches ──────────────────────
+data/raw/*
+!data/raw/.gitkeep
+data/parking_dataset_augmented/
+datasets/*
+!datasets/.gitkeep
+*.cache
 *.parquet
 !data/sim/traj_small.parquet
+*.whl
+*.zip
+*.tar.gz
 
-# IDE & Assistants
+# ───────────────────── Training runs & outputs ─────────────────────
+runs/*
+!runs/.gitkeep
+output/*
+!output/.gitkeep
+debug_out/
+*.log
+*.err
+evaluation_results.json
+
+# ─────────────────────────── Misc ───────────────────────────
+*.bak
+*.tmp
+~$*
+.DS_Store
+Thumbs.db
+
+# ─────────────────────── IDE & assistants ───────────────────────
 .agents/
 .claude/
 .idea/
 .vscode/
-

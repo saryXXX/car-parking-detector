@@ -1,281 +1,230 @@
-# Smart Parking Monitoring & Spatial Analytics
-> **Projet Semestriel 4 : Visual Tracking & Intelligent Applications**  
-> **Niveau :** 5ème Année Génie Informatique (Cours décalés) — AU 2026–2027  
-> **Enseignante :** Dr. Ing. Rihab LAAJILI  
-> **Évaluation :** Phase 1 — Présentation de Cadrage (Pondération : 20 %)
+<!-- ═══════════════════════════ HEADER ═══════════════════════════ -->
+<p align="center">
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=0:0f2027,50:203a43,100:2c5364&height=200&section=header&text=Smart%20Parking%20Monitoring&fontSize=42&fontColor=ffffff&animation=fadeIn&fontAlignY=38&desc=Visual%20Tracking%20%26%20Spatial%20Analytics&descAlignY=58&descSize=18" alt="Smart Parking Monitoring" />
+</p>
+
+<p align="center">
+  <a href="#-features">
+    <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=20&pause=1000&color=36BCF7&center=true&vCenter=true&width=640&lines=Detect+every+car+in+the+lot+%F0%9F%9A%97;Track+it+with+a+persistent+ID+%F0%9F%8E%AF;Map+free+vs+occupied+slots+in+real+time+%F0%9F%9F%A2%F0%9F%94%B4;Measure+dwell+time+%26+flag+bad+parking+%E2%8F%B1%EF%B8%8F;Predict+near-misses+%26+collisions+%F0%9F%92%A5" alt="Typing SVG" />
+  </a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" />
+  <img src="https://img.shields.io/badge/YOLO-Ultralytics-111F68?logo=yolo&logoColor=white" />
+  <img src="https://img.shields.io/badge/Tracker-ByteTrack-ff6f00" />
+  <img src="https://img.shields.io/badge/OpenCV-5.x-5C3EE8?logo=opencv&logoColor=white" />
+  <img src="https://img.shields.io/badge/PyTorch-2.x-EE4C2C?logo=pytorch&logoColor=white" />
+  <img src="https://img.shields.io/badge/Streamlit-dashboard-FF4B4B?logo=streamlit&logoColor=white" />
+  <img src="https://img.shields.io/badge/status-in%20development-yellow" />
+</p>
+
+<p align="center">
+  <a href="#-demo">Demo</a> •
+  <a href="#-features">Features</a> •
+  <a href="#-architecture">Architecture</a> •
+  <a href="#-quick-start">Quick start</a> •
+  <a href="#-project-structure">Structure</a> •
+  <a href="#-roadmap">Roadmap</a>
+</p>
 
 ---
 
-## 🎯 Objectif de ce Document
-Ce fichier `README.md` regroupe l'ensemble des **instructions opérationnelles, des détails techniques et du contenu prêt à l'emploi** pour réussir la **Phase 1 (Présentation de cadrage — Étapes 1 à 4)** prévue le **5/6 novembre 2026**.
+## 📌 About
+
+Ground sensors for parking (magnetic or ultrasonic) are expensive, need civil works, and break down.
+This project uses **the surveillance cameras a lot already has** (fixed or drone) to:
+
+- detect and **track every vehicle** with a persistent ID,
+- keep a **live map of free 🟢 / occupied 🔴 slots**,
+- turn the tracks into useful signals: **dwell time, overstays, badly parked cars, near-misses and collisions**.
+
+> Semester project — *Visual Tracking & Intelligent Applications*.
+> The original Phase 1 scoping document lives in [`docs/PHASE1_CADRAGE.md`](docs/PHASE1_CADRAGE.md).
 
 ---
 
-## 📋 Table des Matières
-1. [Rappel des Exigences du Cahier des Charges](#1-rappel-des-exigences-du-cahier-des-charges)
-2. [Détail des 4 Étapes à Présenter](#2-détail-des-4-étapes-à-présenter)
-   * [Étape 1 : Problématique, Objectifs & Fonctionnalités (avec Extra Touch)](#étape-1--problématique-objectifs--fonctionnalités)
-   * [Étape 2 : Étude Comparative de l'Existant](#étape-2--étude-comparative-de-lexistant)
-   * [Étape 3 : Choix Techniques Argumentés](#étape-3--choix-techniques-argumentés)
-   * [Étape 4 : Dataset Envisagé, Annotation & Scénarios](#étape-4--dataset-envisagé-annotation--scénarios)
-3. [Structure Complète des Slides (Diapo par Diapo)](#3-structure-complète-des-slides-diapo-par-diapo)
-4. [Anticipation des Questions du Jury (FAQ Défense)](#4-anticipation-des-questions-du-jury-faq-défense)
-5. [Mise en Place de l'Environnement de Développement](#5-mise-en-place-de-lenvironnement-de-développement)
+## 🎬 Demo
+
+<table>
+  <tr>
+    <td align="center"><img src="assets/demo/scen1_proper_parking.gif" width="100%"/><br/><b>1 · Proper parking & dwell time</b></td>
+    <td align="center"><img src="assets/demo/scen2_line_straddling.gif" width="100%"/><br/><b>2 · Line straddling (bad parking)</b></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="assets/demo/scen3_near_miss.gif" width="100%"/><br/><b>3 · Near-miss in the aisle</b></td>
+    <td align="center"><img src="assets/demo/scen4_actual_collision.gif" width="100%"/><br/><b>4 · Confirmed collision</b></td>
+  </tr>
+</table>
+
+<details>
+<summary>📸 Real footage (drone & fixed camera)</summary>
+<br/>
+<p align="center">
+  <img src="assets/drone_full_lot_tracking.jpg" width="80%"/><br/>
+  <img src="assets/video_samples/real_tracking_test.jpg" width="80%"/>
+</p>
+<!-- TODO: replace with a GIF of the real pipeline once detection is stable -->
+</details>
 
 ---
 
-## 1. Rappel des Exigences du Cahier des Charges
+## ✨ Features
 
-* **Format du livrable :** Présentation orale en binôme avec support de slides.
-* **Périmètre strict :** Validation exclusive des **étapes 1 à 4** (justification de faisabilité avant développement).
-* **Critères d'évaluation (20 %) :**
-  * Pertinence du sujet et clarté de la problématique.
-  * Rigueur de l'étude comparative (solutions et modèles).
-  * Justification scientifique des choix techniques.
-  * Faisabilité et solidité de la stratégie de dataset.
-* **Règle éliminatoire du projet :** Le tracking doit apporter une vraie valeur applicative (*« Un simple affichage de Bounding Boxes sans exploitation applicative ne répond pas aux exigences »*).
+| | Feature | Status |
+|---|---|:---:|
+| 🚗 | Vehicle detection (YOLO) — fixed cameras | ✅ |
+| 🚁 | Top-down / drone detection (geo-trax aerial YOLOv8s, `aerial` mode) | ✅ |
+| 🎯 | Multi-object tracking with persistent IDs (ByteTrack) | ✅ |
+| 🅿️ | Slot occupancy map (polygon slots + CNN classifier) | ✅ |
+| 🗺️ | Automatic slot map from parked cars (`tools/auto_slots_from_detections.py`) | ✅ |
+| 🚪 | Virtual tripwires: entry / exit counters | ✅ |
+| 📊 | Global occupancy rate | ✅ |
+| ⏱️ | Dwell time per car + overstay alert | ✅ |
+| ↔️ | Line-straddling / double-parking detection | ✅ |
+| 💥 | Near-miss & collision prediction (LightGBM on trajectories) | ✅ |
+| 🚁 | Camera-motion compensation (keyframe GMC, ~1–4 px ground error) | ✅ |
+| 🖥️ | Streamlit dashboard | ✅ |
 
----
-
-## 2. Détail des 4 Étapes à Présenter
-
-### Étape 1 : Problématique, Objectifs & Fonctionnalités
-
-#### A. Contexte et Problématique
-* **Constat :** Jusqu'à 30 % du trafic en centre-ville et sur les campus est généré par des automobilistes cherchant une place de stationnement, entraînant perte de temps, émissions de CO₂ et embouteillages.
-* **Limites actuelles :** Les solutions matérielles par capteurs au sol (magnétiques/ultrasons) sont excessivement chères à l'achat, imposent des travaux de génie civil et tombent en panne à cause des intempéries et du passage des roues.
-* **Solution :** Utiliser des caméras de surveillance standard déjà installées pour analyser et suivre en continu l'occupation et les flux de véhicules grâce au *Visual Tracking*.
-
-#### B. Fonctionnalités de Base
-* Détection et suivi persistant de chaque véhicule entrant dans le champ.
-* Cartographie temps réel des places libres (vert) vs occupées (rouge).
-* Compteurs virtuels d'accès (*Virtual Tripwires*) : total des entrées et sorties.
-* Calcul du taux d'occupation global du parking ($N_{\text{occupées}} / N_{\text{totales}}$).
-
-#### C. Les « Extra Touches » (Facteurs différenciateurs pour le 20/20)
-1. **Horodatage individuel & Dépassement (*Dwell Time Tracking*) :**
-   * Grâce à la persistance du `track_id`, le système mesure la durée exacte de stationnement de chaque véhicule.
-   * Affichage dynamique : `Place #03 [Car #12] : 14m 22s`.
-   * **Alerte de dépassement :** Alerte visuelle clignotante si un véhicule dépasse le temps autorisé (ex: arrêt minute > 15 min).
-2. **Détection du Stationnement Sauvage / Double File (*Obstruction Alert*) :**
-   * Si un véhicule s'immobilise pendant plus de 2.5 secondes dans l'allée centrale hors des places délimitées, le système le signale en rouge clignotant avec une alerte d'obstruction de voie.
-3. **Détection du Stationnement à Cheval sur la Ligne (*Parking on the Line*) :**
-   * Détecte si un véhicule chevauche la ligne blanche séparant deux places (échantillonnage tripartite des roues), bloquant l'accès à deux emplacements et déclenchant une alerte d'incivilité.
-4. **Détection en Temps Réel des Collisions & Near-Miss :**
-   * Suivi cinématique des trajectoires croisées lors des manœuvres de recul ou de circulation en allée : alerte d'imminence (*Near-Miss*) et détection d'impact (*Collision*) avec journalisation de l'incident.
-5. **Calibrateur Interactif 1-Clic :**
-   * Interface graphique permettant de définir les polygones des places sur la première frame en quelques clics sans rien coder en dur, avec export en JSON.
+<sub>✅ working · 🚧 in progress · ⏳ planned</sub>
 
 ---
 
-### Étape 2 : Étude Comparative de l'Existant
+## 🧠 Architecture
 
-#### A. Capteurs Physiques vs Vision par Ordinateur
-| Critère | Capteurs magnétiques IoT | Caméras + Computer Vision (Notre choix) |
-| :--- | :--- | :--- |
-| **Coût matériel** | Très élevé (1 capteur payant par place) | Très économique (1 caméra couvre 20 à 50 places) |
-| **Installation** | Lourde (perçage du sol, coupure du parking) | Rapide (simple fixation en hauteur) |
-| **Données fournies** | Binaire uniquement (0 ou 1) | Binaire + Trajectoires + Vitesse + Catégorie de véhicule + Alertes |
-
-#### B. Comparatif des Modèles de Détection d'Objets
-* **Faster R-CNN :** Précis mais architecture à deux étages trop lente (~8–12 FPS), incompatible avec un flux vidéo temps réel fluide.
-* **SSD (Single Shot MultiBox Detector) :** Rapide mais manque de précision sur les petits véhicules éloignés dans la perspective.
-* **YOLOv8 / YOLOv11 :** Détection en une seule passe, précision de pointe (mAP 53.9) et cadence de **35 à 60 FPS**, idéal pour l'inférence temps réel.
-
-#### C. Comparatif des Algorithmes de Tracking Temporel
-* **SORT :** Repose uniquement sur le filtre de Kalman. Échoue massivement dès qu'un véhicule passe devant un autre (perte d'identifiant / *ID switch*).
-* **DeepSORT :** Ajoute une couche d'extraction d'apparence (Re-ID), mais très lourd en calculs et ralentit drastiquement la cadence.
-* **ByteTrack (Sélectionné) :** Révolutionne le suivi en associant non seulement les détections à score élevé, mais aussi les détections à faible score (voitures partiellement masquées par des arbres ou de l'ombre). Maintient l'identité du véhicule sans perte.
-
----
-
-### Étape 3 : Choix Techniques Argumentés
-
-#### A. Pile Technologique
-* **Langage :** Python 3.10+
-* **Framework de Détection & Tracking :** `ultralytics` (YOLOv8n/s + ByteTrack)
-* **Traitement d'Image & Géométrie :** `opencv-python` et `shapely`
-* **Interface Utilisateur :** `streamlit` pour le tableau de bord interactif en direct
-
-#### B. Pipeline Algorithmique
-```text
-[Flux Vidéo] ──► [Inférence YOLOv8] ──► [Association ByteTrack (ID)] ──► [Test d'Intersection Spatiale] ──► [Filtre Temporel] ──► [Affichage & Alertes]
+```mermaid
+flowchart LR
+    A[🎥 Video / RTSP / Drone] --> B[Camera-motion<br/>compensation]
+    B --> C[YOLO<br/>vehicle detection]
+    C --> D[ByteTrack<br/>persistent IDs]
+    D --> E[Spatial engine<br/>slot polygons]
+    E --> F[Slot classifier<br/>free / occupied]
+    D --> G[Trajectory features]
+    G --> H[Collision model<br/>LightGBM]
+    E --> I[Analytics<br/>dwell · tripwires · alerts]
+    F --> I
+    H --> I
+    I --> J[🖥️ Streamlit dashboard<br/>+ annotated video]
 ```
 
-#### C. Modélisation Mathématique de l'Occupation (Anti-Flickering)
-1. **Point d'ancrage sol :** Pour chaque véhicule détecté avec la boîte $[x_1, y_1, x_2, y_2]$, on utilise le point central de contact au sol :
-   $$P_{\text{sol}} = \left( \frac{x_1 + x_2}{2}, y_2 \right)$$
-2. **Test d'inclusion spatiale :** Vérification géométrique de l'appartenance de $P_{\text{sol}}$ au polygone de la place $S_i$ :
-   $$\text{Inside}(P_{\text{sol}}, S_i) = \begin{cases} 1 & \text{si le point est dans la place} \\ 0 & \text{sinon} \end{cases}$$
-3. **Filtre par hystérésis temporelle :** Pour éviter qu'une voiture qui roule simplement au-dessus d'une place ne la déclare occupée, la place n'est validée `OCCUPÉE` que si la présence persiste pendant au moins $N$ frames consécutives ($N = 30$ frames $\approx 1$ seconde) :
-   $$\text{Occupancy}(S_i) = 1 \iff \sum_{t=k-N}^{k} \text{Inside}_t \ge 0.8 \times N$$
+| Module | Role |
+|---|---|
+| [`src/motion_compensator.py`](src/motion_compensator.py) | Stabilises drone / moving-camera footage |
+| [`src/tracker.py`](src/tracker.py) | YOLO detection + ByteTrack tracking (`aerial=True` for drone footage) |
+| [`src/aerial_detector.py`](src/aerial_detector.py) | Tiled detector for small top-down cars |
+| [`src/spatial_engine.py`](src/spatial_engine.py) | Matches tracks to slot polygons, tripwires, dwell time |
+| [`src/slot_classifier.py`](src/slot_classifier.py) | CNN that labels each slot crop free / occupied |
+| [`src/trajectory_features.py`](src/trajectory_features.py) · [`src/collision_model.py`](src/collision_model.py) | Near-miss / collision prediction |
+| [`src/visualizer.py`](src/visualizer.py) | On-frame overlays |
+| [`app.py`](app.py) | Streamlit dashboard |
+| [`main.py`](main.py) | CLI: run on a video or one of the 4 simulation scenarios |
 
 ---
 
-### Étape 4 : Dataset Envisagé, Annotation & Scénarios
+## 🚀 Quick start
 
-#### A. Datasets Publics de Référence (Licences & Benchmark)
-* **PKLot (Almeida et al.) :** 12 417 images, 695 899 places annotées sous soleil, nuages et pluie. Licence libre **CC BY 4.0** (Open Access sur Kaggle).
-* **MetaPKLot (2024) :** 2,2 millions d'instances avec segmentation polygonale et suivi temporel (`car_id`) disponible sur Hugging Face.
-* **Rôle :** Benchmark initial de baseline et validation de la résistance aux intempéries et ombrages.
-
-#### B. Protocole de Collecte In-Situ (Obligation §4.4 du Cahier des Charges)
-Pour respecter la contrainte stricte d'évaluation sur **vidéos réelles filmées par les étudiants** :
-* **Prise de vue :** Vue plongeante (angle de 35° à 50°) filmée depuis le 2ème étage d'un bâtiment du campus universitaire donnant sur le parking.
-* **Caractéristiques techniques :** Résolution Full HD (1920x1080), 30 FPS fixes, smartphone stabilisé.
-* **Constitution du jeu de données custom :**
-  1. **Vidéo d'entraînement / calibration (3 min) :** 6 à 10 places visibles. Scénarios : 2 arrivées, manœuvres de stationnement, 1 départ, passage de piétons.
-  2. **Vidéo Inédite de Test (2 min - Réservée pour la soutenance finale) :** Filmée un autre jour sous un ensoleillement différent avec d'autres véhicules. **Jamais vue par l'algorithme pendant le développement.**
-
-#### C. Procédure d'Annotation sans Douleur (Format JSON)
-Aucun besoin d'annoter manuellement des milliers de frames !  
-L'application utilise un script interactif `src/calibrate.py` permettant de cliquer sur les 4 coins des places une seule fois sur la première frame. Les polygones sont stockés dans `configs/parking_slots.json` :
-```json
-[
-  {
-    "id": 1,
-    "name": "Slot_01",
-    "polygon": [[120, 340], [210, 345], [195, 480], [105, 470]],
-    "max_dwell_minutes": 15
-  }
-]
-```
-
----
-
-## 3. Structure Complète des Slides (Diapo par Diapo)
-
-Voici le découpage recommandé pour votre présentation orale (10 slides équilibrées) :
-
-| N° | Titre de la Diapositive | Contenu Clé & Visuels |
-| :---: | :--- | :--- |
-| **1** | **Titre & Binôme** | Titre du projet, noms des 2 étudiants, encadrante (Dr. Rihab LAAJILI), Année 2026-2027. |
-| **2** | **Contexte & Problématique** | Chiffres clés (30% du trafic = recherche de place), limites des capteurs IoT (coût/usure), opportunité de la vision. |
-| **3** | **Solution Proposée & Extra Touches** | Vue générale du système + Présentation des 3 innovations (Dwell Time, Détection de double file, Calibration 1-clic). |
-| **4** | **Étude Comparative : Détecteurs** | Tableau comparatif (Faster R-CNN vs SSD vs YOLOv8). Justification du choix YOLO (vitesse 45+ FPS et précision). |
-| **5** | **Étude Comparative : Trackers** | Tableau comparatif (SORT vs DeepSORT vs ByteTrack). Explication du mécanisme d'association bi-niveau de ByteTrack. |
-| **6** | **Architecture Technique Globale** | Diagramme bloc modulaire (Capture $\to$ YOLOv8 $\to$ ByteTrack $\to$ Spatial Engine $\to$ Streamlit UI). |
-| **7** | **Modélisation & Logique Métier** | Formule de projection du point au sol $P_{\text{sol}}$, test d'inclusion polygone et filtre temporel d'hystérésis anti-bruit. |
-| **8** | **Dataset de Référence (Public)** | Présentation de PKLot & MetaPKLot (CC BY 4.0, Kaggle/HuggingFace), conditions météorologiques variées. |
-| **9** | **Protocole In-Situ & Vidéo Inédite** | Photo du point de vue au 2ème étage du campus, spécifications vidéo (1080p, 30 FPS) et garantie de la vidéo test inédite. |
-| **10** | **Planning & Répartition du Binôme** | Tableau de répartition des responsabilités (Étudiant 1 : Vision/Tracking ; Étudiant 2 : Logique/UI) + Diagramme temporel. |
-
----
-
-## 4. Anticipation des Questions du Jury (FAQ Défense)
-
-### Q1 : « Pourquoi ne pas simplement faire un classifieur d'image sur chaque case de parking ? »
-* **Réponse :** Une approche par classification statique de cases (comme dans les vieux papiers de 2015) ne fait aucun **Visual Tracking**. Elle ne sait pas quelle voiture est garée, ne peut pas mesurer le temps de présence d'un individu (`track_id`), ne peut pas compter les entrées/sorties par franchissement de ligne, ni détecter un véhicule gênant qui s'arrête dans l'allée centrale.
-
-### Q2 : « Que se passe-t-il si un piéton ou un arbre masque la voiture garée ? »
-* **Réponse :** C'est exactement la raison d'être de **ByteTrack** couplé à notre **filtre temporel d'hystérésis**. ByteTrack continue d'associer la boîte même avec un faible score de confiance, et notre filtre exige 30 frames d'absence consécutives avant de déclarer une place libérée.
-
-### Q3 : « Pourquoi le Fine-Tuning est-il nécessaire si YOLOv8 est déjà pré-entraîné sur COCO ? »
-* **Réponse :** C'est une découverte majeure de notre étude expérimentale :
-  - Sur un angle de surveillance classique à 45°, les poids COCO fonctionnent.
-  - En revanche, sur une **vue zénithale drone à 90°** (`4196207`), YOLOv8 COCO obtient **0 détection (0% de rappel)** car COCO a été entraîné sur des photos prises à hauteur d'homme (roues, calandres visibles).
-  - Le **Fine-Tuning avec Backbone gelé (freeze=10)** sur le dataset PKLot et des vues aériennes permet de faire passer le rappel de **0% à >90%**, tout en intégrant la classification directe des places (`empty_slot` vs `occupied_slot`).
-
-### Q4 : « Que se passe-t-il si la caméra pivote ou tremble (caméra mobile PTZ) ? »
-* **Réponse :** Nous avons intégré un module de **Compensation Globale de Mouvement (GMC)** utilisant l'algorithme ORB + RANSAC :
-  - La matrice d'homographie $H_t$ est calculée à chaque frame pour recaler dynamiquement les polygones de places sur l'asphalte (effet Réalité Augmentée).
-  - Dès qu'une place quitte l'écran ($x < 0$), elle est masquée pour éviter les boîtes fantômes.
-  - Le système gère dynamiquement les zones de surveillance (**Zone A : Entrée** $\to$ **Zone B : Allée Centrale** $\to$ **Zone C : Bâtiments Est**) en fonction du balayage de la caméra.
-
----
-
-## 5. Scripts d'Exécution & Démonstrations
-
-### A. Démonstration des 4 Scénarios de Simulation
 ```bash
-# Scénario 1 : Stationnement conforme & Chronométrage Dwell Time
-python main.py --scenario 1
+# 1. Environment
+python -m venv .venv
+.venv\Scripts\activate          # Windows  (Linux/macOS: source .venv/bin/activate)
+pip install -r requirements.txt
+python tools/download_models.py   # aerial detector for the drone video
 
-# Scénario 2 : Stationnement à cheval sur la ligne (incivilité bloquant 2 places)
-python main.py --scenario 2
-
-# Scénario 3 : Risque d'accrochage évité (Near-Miss avec freinage d'urgence)
-python main.py --scenario 3
-
-# Scénario 4 : Collision réelle confirmée (Crash en allée centrale)
-python main.py --scenario 4
-```
-
-### B. Traitement Vidéo Réelle avec Suivi Caméra & Zones Adaptatives
-```bash
-# Vidéo commerciale avec balayage caméra (GMC + Multi-Zones)
-python main.py --source 14292633_3840_2160_30fps.mp4 --config configs/commercial_parking_zones.json
-```
-
-### C. Pipeline d'Entraînement & Benchmark d'Adaptabilité
-```bash
-# Lancement du Fine-Tuning (Supporte GPU CUDA et CPU)
-python train_parking.py --epochs 15 --batch 8 --imgsz 640
-
-# Exécution du Benchmark Scientifique d'Adaptabilité (COCO vs Modèle Adapté)
-python benchmark_adaptation.py
-```
-
-### D. Tableau de Bord Web Interactif (Streamlit)
-```bash
+# 2. Dashboard
 streamlit run app.py
+
+# 3. CLI — real video with a slot config
+python main.py --source data/raw_videos/my_video.mp4 --config configs/drone_parking_lot.json --model yolov8n.pt
+
+# 4. CLI — simulation scenario (1 to 4)
+python main.py --scenario 3
+```
+
+<details>
+<summary>🗺️ Defining parking slots for a new camera</summary>
+
+1. Put a video in `data/raw_videos/`.
+2. **Top-down / drone, mostly-full lot:** generate the map from the parked cars, then check the preview image:
+   `python tools/auto_slots_from_detections.py --video data/raw_videos/my_video.mp4 --out configs/my_slots.json`
+3. **Otherwise:** draw the slot polygons by hand with
+   `python calibrate_slots.py --video data/raw_videos/my_video.mp4 --output configs/my_slots.json`.
+4. Pass that JSON with `--config`.
+</details>
+
+<details>
+<summary>📏 Evaluating occupancy accuracy</summary>
+
+```bash
+python tools/eval_occupancy.py --video <video> --config <slots.json> --labels <labels> --modes rule cnn fusion
+```
+
+⚠️ Always validate on a **different video / session / parking lot** than the one used for training — frames from the same clip are near-duplicates and give inflated scores.
+</details>
+
+---
+
+## 🧩 Models
+
+Weights are **not committed** (see `.gitignore`). Put them at the repo root or in `models/`:
+
+| File | What it is | Where it comes from |
+|---|---|---|
+| `yolov8n.pt` / `yolov8n-seg.pt` | COCO vehicle detector (fixed, oblique cameras) | downloaded automatically by Ultralytics |
+| `models/geotrax_yolov8s_1920.pt` | **aerial vehicle detector (drone footage)** — CC-BY-4.0 | `python tools/download_models.py` |
+| `models/visdrone_yolov8s.pt` | aerial alternative (VisDrone) — AGPL-3.0 | `python tools/download_models.py --all` |
+| `models/yolov8n_parking*.pt` | ⚠ old fine-tune, collapsed in training — do not use | `train_parking.py` |
+| slot classifier `best.pt` | free / occupied CNN | `tools/finetune_slot_classifier.py` |
+| `models/collision_lgbm.txt` | collision model | `tools/train_collision_model.py` (committed) |
+
+Datasets used: **PKLot**, **CNRPark-EXT**, and our own drone / fixed-camera clips.
+
+---
+
+## 📁 Project structure
+
+```text
+.
+├── app.py                 # Streamlit dashboard
+├── main.py                # CLI entry point
+├── src/                   # Core pipeline (tracking, spatial engine, classifiers…)
+├── tools/                 # Dataset building, labelling, training & evaluation scripts
+├── configs/               # Slot polygons / zones per camera + dataset YAMLs
+├── notebooks/             # Exploration & training notebooks
+├── assets/                # Images & GIFs used in docs
+├── docs/                  # Project documents (Phase 1 scoping, …)
+├── tests/                 # pytest suite
+├── data/                  # (local) raw videos, datasets, simulations
+├── datasets/              # (local) generated slot crops
+├── models/                # (local) trained weights
+└── runs/                  # (local) Ultralytics training runs
 ```
 
 ---
 
-## 6. Structure Modulaire des Notebooks Google Colab / Kaggle
+## 🛣️ Roadmap
 
-Pour suivre l'avancement phase par phase en toute clarté, chaque étape technique possède son **notebook indépendant et auto-suffisant** :
-
-1. **[`01_Phase1_Simulation_Scenarios.ipynb`](file:///C:/Users/Sary/Ai_Project/01_Phase1_Simulation_Scenarios.ipynb) (Phase 1 — 16 cellules) :**
-   * Définition géométrique et plan 2D du parking.
-   * `SpatialEngine` avec point d'ancrage sol $P_{\text{sol}}$ et hystérésis anti-flickering.
-   * Les 4 expérimentations isolées avec lecteurs vidéo HTML5 intégrés (Dwell time, Stationnement sur la ligne, Near-Miss, Crash).
-
-2. **[`02_Phase2_Camera_Motion_GMC.ipynb`](file:///C:/Users/Sary/Ai_Project/02_Phase2_Camera_Motion_GMC.ipynb) (Phase 2 — 10 cellules) :**
-   * Compensation Globale de Mouvement Caméra (GMC via ORB + RANSAC).
-   * Recalage dynamique des places en Réalité Augmentée ($P_t = H_t \cdot P_0$).
-   * Masquage automatique des places hors-champ ($x < 0$).
-   * Basculement multi-zones adaptatif (Zone A Entrée $\to$ Zone B Allée Centrale).
-   * Filtrage physique fenêtré éliminant 100% des fausses collisions sur les véhicules garés.
-
-3. **[`03_Phase2_FineTuning_PKLot_Drone.ipynb`](file:///C:/Users/Sary/Ai_Project/03_Phase2_FineTuning_PKLot_Drone.ipynb) (Phase 2 — 12 cellules) :**
-   * Preuve scientifique de la rupture de domaine (Vue drone zénithale à 90°).
-   * Préparation et téléchargement du dataset PKLot / Vues aériennes au format YOLOv8.
-   * Entraînement complet avec Transfer Learning et Backbone gelé (`freeze=10`).
-   * Affichage des courbes de perte (`results.png`) et matrice de confusion.
-   * Benchmark Avant/Après sur la vidéo drone `4196207` (0 détection $\to$ 208 détections).
-   * Export automatique des poids finaux [`models/yolov8n_parking.pt`](file:///C:/Users/Sary/Ai_Project/models/yolov8n_parking.pt).
+- [x] Aerial detector (geo-trax) + ByteTrack for drone footage (0 → ~220 of 241 slots correctly occupied)
+- [x] Auto-generated slot map for the drone lot (241 slots, replaces the misaligned hand-drawn one)
+- [x] Keyframe-based GMC (old frame-to-frame GMC drifted up to 41 px)
+- [x] Top-down rules for straddling / near-miss / collision (swept-box time-to-contact)
+- [x] Commercial-lot slots traced from the painted bay lines (18 angled bays) + oblique-camera rules (ground-band footprint, homography-stabilised speeds)
+- [x] Auto slot map skips gaps that cross grass islands (no more phantom empty slots)
+- [ ] Retrain the slot classifier on PKLot + CNRPark with a **held-out parking lot** for validation
+- [ ] Hand-label one frame per video to measure occupancy accuracy
+- [ ] Port dwell time, tripwires and collision alerts onto the new base
+- [ ] Real-footage demo GIF in this README
+- [ ] Alerts export (CSV / webhook)
 
 ---
 
-## 7. Add-on : Classifieur d'occupation par place (CNN)
+## 🧪 Tests
 
-Détail complet dans [`add-ons-plan.md`](file:///C:/Users/Sary/Ai_Project/add-ons-plan.md) section B. Remplace la règle « point au sol dans le polygone » par un CNN `p(occupied)` par place, fusionné avec la même hystérésis (30 frames, seuils 0.8 / 0.2).
-
-**1. Construire le dataset** (séparation par lot/caméra, jamais par image au hasard) :
 ```bash
-python tools/build_slot_dataset.py --source pklot --root data/raw/pklot/PKLot \
-  --out datasets/slots --val-groups UFPR05 --test-groups PUCPR
+pytest tests/
 ```
-
-**2. Entraîner en deux temps :**
-```bash
-yolo classify train data=datasets/slots model=yolo11n-cls.pt imgsz=224 epochs=30 batch=128
-yolo classify train data=datasets/slots_own model=runs/classify/train/weights/best.pt \
-  imgsz=224 epochs=15 lr0=0.001
-```
-
-**3. Évaluer** (règle vs CNN vs fusion) :
-```bash
-python tools/eval_occupancy.py --video <video> --config configs/parking_slots.json \
-  --labels ground_truth.csv --weights runs/classify/train/weights/best.pt
-```
-
-**4. Activer dans l'app :** une fois `runs/classify/train/weights/best.pt` présent, le sélecteur « Occupation : Règles / CNN / Fusion » du popover « Model settings » se débloque automatiquement.
-
-Critère d'acceptation : précision par place ≥ 97 % et moins de changements d'état par place par minute que la règle, sur le lot et la vidéo tenus à l'écart de l'entraînement.
 
 ---
-*Ce document couvre 100 % des attendus de la Phase 1 et de la Phase 2 du Cahier des Charges.*
 
+<p align="center">
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=0:2c5364,50:203a43,100:0f2027&height=100&section=footer" />
+</p>

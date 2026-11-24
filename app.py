@@ -91,17 +91,32 @@ EPISODES = [
         "desc": "Handheld 4K footage of a commercial lot. Global motion compensation keeps "
                 "the slot map pinned to the ground while YOLO tracks every car.",
         "video": "14292633_3840_2160_30fps.mp4",
-        "config": "configs/commercial_parking_slots.json",
+        # commercial_parking_slots.json was calibrated at the native 3840x2160 resolution
+        # while the app always runs tracking/matching on a 1280x720 downscale -- its slot
+        # polygons sit entirely outside that frame (3x too large), so every slot read as
+        # permanently out-of-view/empty. commercial_parking_zones.json is the correct,
+        # zone-aware calibration. Slots A1-A9 / B1-B9 are traced from the painted bay lines
+        # (Hough), C1 is the white SUV by the kerb.
+        "config": "configs/commercial_parking_zones.json",
+        # Camera looks across the lot: slot / contact tests use each car's ground band.
+        "oblique": True,
     },
     {
         "id": "r2", "badge": "4K", "kicker": "Real footage",
         "source": "🚁 Vidéo Réelle 2 : Drone Zénithal 90° (Top-Down)",
         "title": "Drone's Eye View",
-        "genres": ["Real footage", "Drone", "141 slots"],
-        "desc": "A 90° top-down drone pass over a 141-slot lot. Occupancy for every "
+        "genres": ["Real footage", "Drone", "235 slots"],
+        "desc": "A 90° top-down drone pass over a 235-slot lot. Occupancy for every "
                 "single slot, seen from above.",
         "video": "4196207-uhd_3840_2160_24fps.mp4",
-        "config": "configs/drone_parking_lot.json",
+        # Hand-drawn drone_parking_lot.json was misaligned (polygons spanning 1.5-2 real
+        # spaces, 141 of ~260 slots). This one is generated from the parked cars by
+        # tools/auto_slots_from_detections.py.
+        "config": "configs/drone_parking_lot_auto.json",
+        # Top-down cars are invisible to COCO YOLO -> aerial-trained detector (falls back to
+        # tiled COCO detection if the weights are missing, see src/aerial_detector.py).
+        "aerial": True,
+        "model": "models/geotrax_yolov8s_1920.pt",
     },
     {
         "id": "upload", "badge": "", "kicker": "Bring your own", "icon": "📁",
@@ -254,11 +269,24 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-model_map = {"yolov8n.pt (Baseline COCO)": "yolov8n.pt"}
+model_map = {
+    "yolov8n.pt (Baseline COCO)": "yolov8n.pt",
+    # Pixel-mask instance segmentation instead of plain bboxes -- more precise slot-overlap
+    # computation on oblique/angled cameras. Auto-downloads from Ultralytics on first use,
+    # same as yolov8n.pt above (both are free, local-inference, no paid API involved).
+    "yolov8n-seg.pt (Segmentation - pixel masks)": "yolov8n-seg.pt",
+}
 if os.path.exists("models"):
     for pt_file in sorted(Path("models").glob("*.pt")):
         fname = pt_file.name
-        if "v1" in fname:
+        if fname.startswith("geotrax"):
+            label = f"{fname} (Aerial · vehicles, CC-BY-4.0)"
+        elif fname.startswith("visdrone"):
+            label = f"{fname} (Aerial · VisDrone, AGPL)"
+        elif fname.startswith("yolov8n_parking"):
+            # These checkpoints collapsed in training (conf 1.00 on trees/grass); kept for reference.
+            label = f"{fname} (⚠ broken fine-tune)"
+        elif "v1" in fname:
             label = f"{fname} (V1 · drone fine-tune)"
         elif "v2" in fname:
             label = f"{fname} (V2 · Colab fine-tune)"
@@ -334,6 +362,21 @@ def render_upload_controls():
     )
 
 
+def render_webcam_controls():
+    st.session_state.webcam_url = st.text_input(
+        "Camera source (leave blank for local webcam index 0)",
+        value=st.session_state.get("webcam_url", ""),
+        key="webcam_url_widget",
+        help="Local webcam: leave blank. IP camera / NVR: rtsp://user:pass@host:554/stream1 . "
+             "HTTP MJPEG: http://host/video . Anything OpenCV's VideoCapture accepts works here.",
+    )
+    current = st.session_state.get("webcam_config", UPLOAD_CONFIGS[0])
+    st.session_state.webcam_config = st.selectbox(
+        "Slot layout (calibrate with src/calibrate.py --source <same URL> first)",
+        UPLOAD_CONFIGS, index=UPLOAD_CONFIGS.index(current), key="webcam_config_widget",
+    )
+
+
 def render_browse(ep):
     hero_img = episode_image(ep["id"], 1280)
     backdrop = f'url("{hero_img}")' if hero_img else "radial-gradient(circle at 75% 40%, #5c0a0f 0%, #141414 70%)"
@@ -356,6 +399,8 @@ def render_browse(ep):
         )
         if ep["id"] == "upload":
             render_upload_controls()
+        elif ep["id"] == "webcam":
+            render_webcam_controls()
         can_play = ep["id"] != "upload" or bool(st.session_state.get("upload_path"))
         st.button("▶  Play", key="hero_play", on_click=start_playing, disabled=not can_play)
 
@@ -403,6 +448,8 @@ config_file = episode.get("config", SIM_CONFIG)
 if episode["id"] == "upload":
     video_path = st.session_state.get("upload_path")
     config_file = st.session_state.get("upload_config", UPLOAD_CONFIGS[0])
+elif episode["id"] == "webcam":
+    config_file = st.session_state.get("webcam_config", UPLOAD_CONFIGS[0])
 
 
 def run_dashboard():
@@ -415,30 +462,47 @@ def run_dashboard():
         from src.slot_classifier import SlotClassifier
         slot_classifier = SlotClassifier(slot_weights_path, every_n_frames=3)
 
-    collision_model = None
-    if collision_mode == "ml" and collision_weights_exist:
-        from src.collision_model import CollisionModel
-        collision_model = CollisionModel(collision_weights_path)
-
+    # Built without a collision_model first so we can read the engine's resolved
+    # px_per_metre (explicit > calibrated via src/calibrate.py --ref-metres > 75px/m
+    # fallback) and hand the ML model the SAME scale, instead of each guessing separately.
     engine = SpatialEngine(config_path=config_file, occupancy_mode=occupancy_mode,
                             slot_classifier=slot_classifier, collision_mode=collision_mode,
-                            collision_model=collision_model)
+                            top_down=episode.get("aerial", False),
+                            oblique=episode.get("oblique", False))
+
+    if collision_mode == "ml" and collision_weights_exist:
+        from src.collision_model import CollisionModel
+        engine.collision_model = CollisionModel(collision_weights_path,
+                                                  pixel_to_metre_scale=1.0 / engine.px_per_metre)
+
     visualizer = ParkingVisualizer(slot_definitions=engine.slots)
 
     tracker = None
     cap = None
+    live_source = None  # non-None only for webcam/RTSP: enables reconnect-on-drop below
 
     if "Scénario" in source_type:
         pass  # Mode simulation cinématique directe
     elif "Webcam" in source_type:
-        cap = cv2.VideoCapture(0)
+        live_source = st.session_state.get("webcam_url", "").strip() or 0
+        cap = cv2.VideoCapture(live_source)
+        if not cap.isOpened():
+            st.error(f"Impossible d'ouvrir la source live '{live_source}'.")
+            return
         tracker = VehicleTracker(model_name=model_choice, conf_threshold=conf_thresh)
     else:
         if not video_path or not os.path.exists(video_path):
             st.warning("Vidéo introuvable ou non sélectionnée.")
             return
         cap = cv2.VideoCapture(video_path)
-        tracker = VehicleTracker(model_name=model_choice, conf_threshold=conf_thresh)
+        ep_model = episode.get("model")
+        if ep_model and os.path.exists(ep_model):
+            st.caption(f"Detector for this video: `{ep_model}` (aerial)")
+        else:
+            ep_model = model_choice
+        tracker = VehicleTracker(model_name=ep_model, conf_threshold=conf_thresh,
+                                 aerial=episode.get("aerial", False),
+                                 fps=cap.get(cv2.CAP_PROP_FPS) or 30.0)
 
     frame_idx = 0
     width, height = 1280, 720
@@ -452,7 +516,9 @@ def run_dashboard():
     collision_sound_played = False
 
     gmc = CameraMotionCompensator(max_features=500)
+    video_t0 = time.time()  # recorded videos: timestamps = start time + position in the file
     base_slots = [dict(s) for s in engine.slots]
+    base_lane_zones = [dict(lz) for lz in engine.lane_zones]
 
     while True:
         curr_time = time.time()
@@ -603,8 +669,21 @@ def run_dashboard():
         else:
             ret, frame = cap.read()
             if not ret:
+                if live_source is not None:
+                    # Live feed dropped a frame / connection hiccup: reconnect instead of ending.
+                    cap.release()
+                    time.sleep(1.0)
+                    cap = cv2.VideoCapture(live_source)
+                    if not cap.isOpened():
+                        st.warning(f"Flux live '{live_source}' indisponible, nouvelle tentative...")
+                    continue
                 st.info("Flux vidéo terminé.")
                 break
+
+            if live_source is None:
+                # Recorded file: use the video clock. Processing runs slower than real time,
+                # so wall-clock time would shrink every speed (and stretch dwell times).
+                curr_time = video_t0 + cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
 
             if frame.shape[1] > 1280:
                 frame = cv2.resize(frame, (1280, 720))
@@ -614,10 +693,14 @@ def run_dashboard():
             comp_slots = gmc.transform_polygons(base_slots, frame_width=frame.shape[1], frame_height=frame.shape[0])
             engine.set_dynamic_slots(comp_slots)
             visualizer.set_dynamic_slots(comp_slots)
+            if base_lane_zones:
+                comp_lane_zones = gmc.transform_polygons(base_lane_zones, frame_width=frame.shape[1], frame_height=frame.shape[0])
+                engine.set_dynamic_lane_zones(comp_lane_zones)
 
             tracked = tracker.track(frame)
             analytics = engine.update(tracked, current_time=curr_time, camera_dx=gmc.camera_dx,
-                                       camera_dy=gmc.camera_dy, frame=frame)
+                                       camera_dy=gmc.camera_dy, frame=frame,
+                                       ground_H=gmc.accumulated_H)
             vis = visualizer.render(frame, analytics, tracked, zone_info=zone_info, fps=30.0)
 
         # KPIs

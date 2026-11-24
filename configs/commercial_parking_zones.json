@@ -1,73 +1,504 @@
-[
-  {
-    "id": 1,
-    "name": "Slot_A1",
-    "zone": "ZONE_A",
-    "polygon": [[90, 430], [245, 430], [245, 540], [90, 540]],
-    "max_dwell_minutes": 15
-  },
-  {
-    "id": 2,
-    "name": "Slot_A2",
-    "zone": "ZONE_A",
-    "polygon": [[260, 470], [440, 470], [440, 600], [260, 600]],
-    "max_dwell_minutes": 15
-  },
-  {
-    "id": 3,
-    "name": "Slot_A3",
-    "zone": "ZONE_A",
-    "polygon": [[460, 500], [650, 500], [650, 640], [460, 640]],
-    "max_dwell_minutes": 15
-  },
-  {
-    "id": 4,
-    "name": "Slot_A4",
-    "zone": "ZONE_A",
-    "polygon": [[660, 480], [815, 480], [815, 610], [660, 610]],
-    "max_dwell_minutes": 15
-  },
-  {
-    "id": 5,
-    "name": "Slot_A5",
-    "zone": "ZONE_A",
-    "polygon": [[820, 470], [1020, 470], [1020, 610], [820, 610]],
-    "max_dwell_minutes": 15
-  },
-  {
-    "id": 6,
-    "name": "Slot_B1",
-    "zone": "ZONE_B",
-    "polygon": [[820, 390], [960, 390], [960, 470], [820, 470]],
-    "max_dwell_minutes": 15
-  },
-  {
-    "id": 7,
-    "name": "Slot_B2",
-    "zone": "ZONE_B",
-    "polygon": [[970, 390], [1110, 390], [1110, 470], [970, 470]],
-    "max_dwell_minutes": 15
-  },
-  {
-    "id": 8,
-    "name": "Slot_B3",
-    "zone": "ZONE_B",
-    "polygon": [[1120, 390], [1260, 390], [1260, 470], [1120, 470]],
-    "max_dwell_minutes": 15
-  },
-  {
-    "id": 9,
-    "name": "Slot_C1",
-    "zone": "ZONE_C",
-    "polygon": [[200, 340], [330, 340], [330, 420], [200, 420]],
-    "max_dwell_minutes": 15
-  },
-  {
-    "id": 10,
-    "name": "Slot_C2",
-    "zone": "ZONE_C",
-    "polygon": [[340, 340], [470, 340], [470, 420], [340, 420]],
-    "max_dwell_minutes": 15
-  }
-]
-
+{
+  "slots": [
+    {
+      "id": 1,
+      "name": "Slot_A1",
+      "zone": "ZONE_A",
+      "polygon": [
+        [
+          576,
+          646
+        ],
+        [
+          660,
+          605
+        ],
+        [
+          835,
+          699
+        ],
+        [
+          751,
+          719
+        ]
+      ],
+      "max_dwell_minutes": 15
+    },
+    {
+      "id": 2,
+      "name": "Slot_A2",
+      "zone": "ZONE_A",
+      "polygon": [
+        [
+          660,
+          605
+        ],
+        [
+          731,
+          572
+        ],
+        [
+          901,
+          652
+        ],
+        [
+          835,
+          699
+        ]
+      ],
+      "max_dwell_minutes": 15
+    },
+    {
+      "id": 3,
+      "name": "Slot_A3",
+      "zone": "ZONE_A",
+      "polygon": [
+        [
+          731,
+          572
+        ],
+        [
+          792,
+          542
+        ],
+        [
+          958,
+          613
+        ],
+        [
+          901,
+          652
+        ]
+      ],
+      "max_dwell_minutes": 15
+    },
+    {
+      "id": 4,
+      "name": "Slot_A4",
+      "zone": "ZONE_A",
+      "polygon": [
+        [
+          792,
+          542
+        ],
+        [
+          847,
+          516
+        ],
+        [
+          1008,
+          578
+        ],
+        [
+          958,
+          613
+        ]
+      ],
+      "max_dwell_minutes": 15
+    },
+    {
+      "id": 5,
+      "name": "Slot_A5",
+      "zone": "ZONE_A",
+      "polygon": [
+        [
+          847,
+          516
+        ],
+        [
+          895,
+          493
+        ],
+        [
+          1053,
+          547
+        ],
+        [
+          1008,
+          578
+        ]
+      ],
+      "max_dwell_minutes": 15
+    },
+    {
+      "id": 6,
+      "name": "Slot_A6",
+      "zone": "ZONE_A",
+      "polygon": [
+        [
+          895,
+          493
+        ],
+        [
+          937,
+          473
+        ],
+        [
+          1092,
+          521
+        ],
+        [
+          1053,
+          547
+        ]
+      ],
+      "max_dwell_minutes": 15
+    },
+    {
+      "id": 7,
+      "name": "Slot_A7",
+      "zone": "ZONE_A",
+      "polygon": [
+        [
+          937,
+          473
+        ],
+        [
+          977,
+          454
+        ],
+        [
+          1128,
+          496
+        ],
+        [
+          1092,
+          521
+        ]
+      ],
+      "max_dwell_minutes": 15
+    },
+    {
+      "id": 8,
+      "name": "Slot_A8",
+      "zone": "ZONE_A",
+      "polygon": [
+        [
+          977,
+          454
+        ],
+        [
+          1011,
+          438
+        ],
+        [
+          1161,
+          475
+        ],
+        [
+          1128,
+          496
+        ]
+      ],
+      "max_dwell_minutes": 15
+    },
+    {
+      "id": 9,
+      "name": "Slot_A9",
+      "zone": "ZONE_A",
+      "polygon": [
+        [
+          1011,
+          438
+        ],
+        [
+          1043,
+          423
+        ],
+        [
+          1190,
+          455
+        ],
+        [
+          1161,
+          475
+        ]
+      ],
+      "max_dwell_minutes": 15
+    },
+    {
+      "id": 10,
+      "name": "Slot_B1",
+      "zone": "ZONE_B",
+      "polygon": [
+        [
+          451,
+          570
+        ],
+        [
+          535,
+          539
+        ],
+        [
+          660,
+          605
+        ],
+        [
+          576,
+          646
+        ]
+      ],
+      "max_dwell_minutes": 15
+    },
+    {
+      "id": 11,
+      "name": "Slot_B2",
+      "zone": "ZONE_B",
+      "polygon": [
+        [
+          535,
+          539
+        ],
+        [
+          606,
+          512
+        ],
+        [
+          731,
+          572
+        ],
+        [
+          660,
+          605
+        ]
+      ],
+      "max_dwell_minutes": 15
+    },
+    {
+      "id": 12,
+      "name": "Slot_B3",
+      "zone": "ZONE_B",
+      "polygon": [
+        [
+          606,
+          512
+        ],
+        [
+          667,
+          489
+        ],
+        [
+          792,
+          542
+        ],
+        [
+          731,
+          572
+        ]
+      ],
+      "max_dwell_minutes": 15
+    },
+    {
+      "id": 13,
+      "name": "Slot_B4",
+      "zone": "ZONE_B",
+      "polygon": [
+        [
+          667,
+          489
+        ],
+        [
+          722,
+          469
+        ],
+        [
+          847,
+          516
+        ],
+        [
+          792,
+          542
+        ]
+      ],
+      "max_dwell_minutes": 15
+    },
+    {
+      "id": 14,
+      "name": "Slot_B5",
+      "zone": "ZONE_B",
+      "polygon": [
+        [
+          722,
+          469
+        ],
+        [
+          770,
+          451
+        ],
+        [
+          895,
+          493
+        ],
+        [
+          847,
+          516
+        ]
+      ],
+      "max_dwell_minutes": 15
+    },
+    {
+      "id": 15,
+      "name": "Slot_B6",
+      "zone": "ZONE_B",
+      "polygon": [
+        [
+          770,
+          451
+        ],
+        [
+          812,
+          435
+        ],
+        [
+          937,
+          473
+        ],
+        [
+          895,
+          493
+        ]
+      ],
+      "max_dwell_minutes": 15
+    },
+    {
+      "id": 16,
+      "name": "Slot_B7",
+      "zone": "ZONE_B",
+      "polygon": [
+        [
+          812,
+          435
+        ],
+        [
+          852,
+          420
+        ],
+        [
+          977,
+          454
+        ],
+        [
+          937,
+          473
+        ]
+      ],
+      "max_dwell_minutes": 15
+    },
+    {
+      "id": 17,
+      "name": "Slot_B8",
+      "zone": "ZONE_B",
+      "polygon": [
+        [
+          852,
+          420
+        ],
+        [
+          886,
+          407
+        ],
+        [
+          1011,
+          438
+        ],
+        [
+          977,
+          454
+        ]
+      ],
+      "max_dwell_minutes": 15
+    },
+    {
+      "id": 18,
+      "name": "Slot_B9",
+      "zone": "ZONE_B",
+      "polygon": [
+        [
+          886,
+          407
+        ],
+        [
+          918,
+          395
+        ],
+        [
+          1043,
+          423
+        ],
+        [
+          1011,
+          438
+        ]
+      ],
+      "max_dwell_minutes": 15
+    },
+    {
+      "id": 19,
+      "name": "Slot_C1",
+      "zone": "ZONE_C",
+      "polygon": [
+        [
+          90,
+          430
+        ],
+        [
+          245,
+          430
+        ],
+        [
+          245,
+          540
+        ],
+        [
+          90,
+          540
+        ]
+      ],
+      "max_dwell_minutes": 15
+    }
+  ],
+  "lane_zones": [
+    {
+      "id": 1,
+      "name": "Voie_Entree_Rond_Point",
+      "polygon": [
+        [
+          520,
+          240
+        ],
+        [
+          560,
+          185
+        ],
+        [
+          660,
+          165
+        ],
+        [
+          860,
+          165
+        ],
+        [
+          1010,
+          195
+        ],
+        [
+          1015,
+          250
+        ],
+        [
+          1000,
+          300
+        ],
+        [
+          780,
+          300
+        ],
+        [
+          600,
+          295
+        ]
+      ]
+    }
+  ]
+}
