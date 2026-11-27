@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 300" width="880" height="300" role="img" aria-label="Animated parking lot: a tracked car enters, parks in a free slot, and the slot turns from free to occupied">
+  <defs>
+    <linearGradient id="scan" x1="0" x2="1">
+      <stop offset="0" stop-color="#58a6ff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#58a6ff" stop-opacity="0.22"/>
+    </linearGradient>
+    <clipPath id="lot"><rect x="100" y="44" width="580" height="212" rx="6"/></clipPath>
+    <g id="parked">
+      <rect x="-14" y="-24" width="28" height="48" rx="7" fill="#8b949e"/>
+      <rect x="-11" y="-14" width="22" height="13" rx="3" fill="#30363d"/>
+      <rect x="-11" y="8" width="22" height="8" rx="3" fill="#30363d"/>
+    </g>
+  </defs>
+  <style>
+    text { font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; }
+    .slot { fill: none; stroke-width: 2.5; }
+    .free { stroke: #3fb950; }
+    .occ { stroke: #f85149; }
+    .lbl { fill: #8b949e; font-size: 11px; }
+    .big { font-size: 26px; font-weight: 700; }
+  </style>
+
+  <rect width="880" height="300" rx="16" fill="#0d1117"/>
+  <rect x="0.5" y="0.5" width="879" height="299" rx="16" fill="none" stroke="#30363d"/>
+
+  <!-- header -->
+  <circle cx="28" cy="24" r="5" fill="#f85149">
+    <animate attributeName="opacity" values="1;0.2;1" dur="1.4s" repeatCount="indefinite"/>
+  </circle>
+  <text x="40" y="28" fill="#e6edf3" font-size="13" font-weight="700">LIVE · slot occupancy</text>
+  <text x="680" y="28" fill="#8b949e" font-size="11" text-anchor="end">YOLO → ByteTrack → SpatialEngine</text>
+
+  <!-- lot surface -->
+  <rect x="100" y="44" width="580" height="212" rx="6" fill="#161b22"/>
+  <line x1="100" y1="150" x2="680" y2="150" stroke="#e3b341" stroke-width="1.5" stroke-dasharray="14 10" opacity="0.5"/>
+
+  <!-- top row (y 50-120), 8 bays of 70 px from x=120 -->
+  <g>
+    <rect class="slot occ" x="122" y="52" width="66" height="66" rx="3"/>
+    <rect class="slot occ" x="192" y="52" width="66" height="66" rx="3"/>
+    <rect class="slot free" x="262" y="52" width="66" height="66" rx="3"/>
+    <rect class="slot occ" x="332" y="52" width="66" height="66" rx="3"/>
+    <rect class="slot occ" x="402" y="52" width="66" height="66" rx="3"/>
+    <rect class="slot" x="472" y="52" width="66" height="66" rx="3" stroke="#3fb950">
+      <animate attributeName="stroke" values="#3fb950;#f85149" keyTimes="0;0.6" calcMode="discrete" dur="9s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="472" y="52" width="66" height="66" rx="3" fill="#f85149" opacity="0">
+      <animate attributeName="opacity" values="0;0.35;0.08;0.08" keyTimes="0;0.6;0.7;1" calcMode="linear" dur="9s" repeatCount="indefinite"/>
+    </rect>
+    <rect class="slot occ" x="542" y="52" width="66" height="66" rx="3"/>
+    <rect class="slot free" x="612" y="52" width="66" height="66" rx="3"/>
+    <use href="#parked" x="155" y="85"/><use href="#parked" x="225" y="85"/>
+    <use href="#parked" x="365" y="85"/><use href="#parked" x="435" y="85"/>
+    <use href="#parked" x="575" y="85"/>
+  </g>
+  <!-- bottom row (y 180-250) -->
+  <g>
+    <rect class="slot occ" x="122" y="182" width="66" height="66" rx="3"/>
+    <rect class="slot free" x="192" y="182" width="66" height="66" rx="3"/>
+    <rect class="slot occ" x="262" y="182" width="66" height="66" rx="3"/>
+    <rect class="slot occ" x="332" y="182" width="66" height="66" rx="3"/>
+    <rect class="slot occ" x="402" y="182" width="66" height="66" rx="3"/>
+    <rect class="slot occ" x="472" y="182" width="66" height="66" rx="3"/>
+    <rect class="slot free" x="542" y="182" width="66" height="66" rx="3"/>
+    <rect class="slot occ" x="612" y="182" width="66" height="66" rx="3"/>
+    <use href="#parked" x="155" y="215"/><use href="#parked" x="295" y="215"/>
+    <use href="#parked" x="365" y="215"/><use href="#parked" x="435" y="215"/>
+    <use href="#parked" x="505" y="215"/><use href="#parked" x="645" y="215"/>
+  </g>
+
+  <!-- tripwire -->
+  <line x1="140" y1="122" x2="140" y2="178" stroke="#d2a8ff" stroke-width="2"/>
+  <text x="146" y="174" fill="#d2a8ff" font-size="10">tripwire</text>
+
+  <!-- scanning sweep -->
+  <g clip-path="url(#lot)">
+    <rect x="0" y="44" width="70" height="212" fill="url(#scan)">
+      <animate attributeName="x" values="30;690" dur="3s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+
+  <!-- moving tracked car (body rotates with path) -->
+  <g opacity="0">
+    <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.04;0.94;1" dur="9s" repeatCount="indefinite"/>
+    <animateMotion dur="9s" repeatCount="indefinite" rotate="auto" keyPoints="0;1;1" keyTimes="0;0.6;1" calcMode="linear"
+                   path="M 60 150 L 455 150 Q 505 150 505 110 L 505 86"/>
+    <rect x="-24" y="-14" width="48" height="28" rx="8" fill="#58a6ff"/>
+    <rect x="2" y="-11" width="12" height="22" rx="3" fill="#0d1117" opacity="0.7"/>
+    <rect x="-18" y="-11" width="8" height="22" rx="3" fill="#0d1117" opacity="0.7"/>
+    <rect x="-30" y="-20" width="60" height="40" fill="none" stroke="#58a6ff" stroke-width="1.5" stroke-dasharray="4 3"/>
+  </g>
+  <!-- ID label (same motion, no rotation) -->
+  <g opacity="0">
+    <animate attributeName="opacity" values="0;1;1;0" keyTimes="0;0.04;0.94;1" dur="9s" repeatCount="indefinite"/>
+    <animateMotion dur="9s" repeatCount="indefinite" keyPoints="0;1;1" keyTimes="0;0.6;1" calcMode="linear"
+                   path="M 60 150 L 455 150 Q 505 150 505 110 L 505 86"/>
+    <rect x="-28" y="-40" width="56" height="16" rx="4" fill="#58a6ff"/>
+    <text x="0" y="-28" fill="#0d1117" font-size="11" font-weight="700" text-anchor="middle">ID 17</text>
+  </g>
+  <!-- dwell label -->
+  <text x="505" y="138" fill="#e3b341" font-size="11" text-anchor="middle" opacity="0">⏱ dwell started
+    <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.62;0.66;0.92;1" dur="9s" repeatCount="indefinite"/>
+  </text>
+
+  <!-- side panel -->
+  <g transform="translate(700 44)">
+    <rect width="164" height="212" rx="8" fill="#161b22" stroke="#30363d"/>
+    <text x="14" y="26" class="lbl">FREE</text>
+    <g>
+      <text x="14" y="58" class="big" fill="#3fb950">5<animate attributeName="opacity" values="1;0" keyTimes="0;0.6" calcMode="discrete" dur="9s" repeatCount="indefinite"/></text>
+      <text x="14" y="58" class="big" fill="#3fb950" opacity="0">4<animate attributeName="opacity" values="0;1" keyTimes="0;0.6" calcMode="discrete" dur="9s" repeatCount="indefinite"/></text>
+    </g>
+    <text x="90" y="26" class="lbl">OCCUPIED</text>
+    <g>
+      <text x="90" y="58" class="big" fill="#f85149">11<animate attributeName="opacity" values="1;0" keyTimes="0;0.6" calcMode="discrete" dur="9s" repeatCount="indefinite"/></text>
+      <text x="90" y="58" class="big" fill="#f85149" opacity="0">12<animate attributeName="opacity" values="0;1" keyTimes="0;0.6" calcMode="discrete" dur="9s" repeatCount="indefinite"/></text>
+    </g>
+    <text x="14" y="96" class="lbl">OCCUPANCY</text>
+    <rect x="14" y="106" width="136" height="10" rx="5" fill="#30363d"/>
+    <rect x="14" y="106" width="94" height="10" rx="5" fill="#e3b341">
+      <animate attributeName="width" values="94;94;102;102" keyTimes="0;0.6;0.64;1" dur="9s" repeatCount="indefinite"/>
+    </rect>
+    <text x="14" y="138" fill="#e6edf3" font-size="13">69 %<animate attributeName="opacity" values="1;0" keyTimes="0;0.6" calcMode="discrete" dur="9s" repeatCount="indefinite"/></text>
+    <text x="14" y="138" fill="#e6edf3" font-size="13" opacity="0">75 %<animate attributeName="opacity" values="0;1" keyTimes="0;0.6" calcMode="discrete" dur="9s" repeatCount="indefinite"/></text>
+    <text x="14" y="168" class="lbl">ENTRIES</text>
+    <text x="14" y="190" fill="#d2a8ff" font-size="15" font-weight="700">41<animate attributeName="opacity" values="1;0" keyTimes="0;0.1" calcMode="discrete" dur="9s" repeatCount="indefinite"/></text>
+    <text x="14" y="190" fill="#d2a8ff" font-size="15" font-weight="700" opacity="0">42<animate attributeName="opacity" values="0;1" keyTimes="0;0.1" calcMode="discrete" dur="9s" repeatCount="indefinite"/></text>
+    <text x="90" y="168" class="lbl">ALERTS</text>
+    <text x="90" y="190" fill="#3fb950" font-size="15" font-weight="700">0</text>
+  </g>
+</svg>

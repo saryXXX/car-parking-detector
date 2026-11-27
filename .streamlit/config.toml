@@ -7,3 +7,7 @@ textColor = "#e5e5e5"
 
 [client]
 toolbarMode = "minimal"
+
+[server]
+# Serves ./static/ at app/static/ -- episode thumbnails are cached there (see app.py).
+enableStaticServing = true

@@ -37,6 +37,10 @@ datasets/*
 *.cache
 *.parquet
 !data/sim/traj_small.parquet
+# Dashboard caches (replays of analysed videos, episode thumbnails, uploads)
+data/cache/
+static/thumbs/
+data/temp/
 *.whl
 *.zip
 *.tar.gz

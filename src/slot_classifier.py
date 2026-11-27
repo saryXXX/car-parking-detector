@@ -20,9 +20,9 @@ CROP_SIZE = (128, 256)  # (width, height), must match tools/build_slot_dataset.p
 class SlotClassifier:
     def __init__(self, weights_path: str, device: str = "cpu", every_n_frames: int = 3,
                  imgsz: int = 224):
-        from ultralytics import YOLO  # local import: optional dependency
+        from src.model_cache import get_yolo  # local import: optional dependency
 
-        self.model = YOLO(weights_path)
+        self.model = get_yolo(weights_path, "classify")  # loaded once per process
         self.device = device
         self.every_n_frames = max(1, every_n_frames)
         self.imgsz = imgsz

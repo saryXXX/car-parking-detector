@@ -162,7 +162,9 @@ class SpatialEngine:
     def slot_footprint_overlap(self, bbox: Tuple[float, float, float, float], slot_polygon: List[List[int]]) -> float:
         """Fraction of the vehicle's footprint samples that fall inside this slot polygon."""
         samples = self.get_topdown_samples(bbox) if self.top_down else self.get_footprint_samples(bbox)
-        hits = sum(1 for pt in samples if self.is_point_in_slot(pt, slot_polygon))
+        # Same test as is_point_in_slot(), with the polygon converted once instead of per sample.
+        pts = np.array(slot_polygon, np.int32)
+        hits = sum(1 for x, y in samples if cv2.pointPolygonTest(pts, (float(x), float(y)), False) >= 0)
         return hits / len(samples)
 
     @staticmethod
@@ -177,26 +179,22 @@ class SpatialEngine:
         mask's height in every column. Seen at an angle, a car's roof and windscreen project
         onto the bay *behind* it; only the bottom silhouette (wheels, sills) touches its own bay.
         """
+        raster = SpatialEngine.vehicle_raster(vehicle_mask, ground_band)
+        return SpatialEngine.raster_slot_overlap(raster, slot_polygon)
+
+    @staticmethod
+    def vehicle_raster(vehicle_mask: List[List[float]], ground_band: Optional[float] = None):
+        """Rasterize a vehicle mask (optionally cut to its ground band) ONCE on a small canvas
+        around the vehicle, so it can be tested against every nearby slot without redoing the
+        fill + ground-band pass per slot. Returns (canvas, offset_xy, area) or None."""
         veh_pts = np.array(vehicle_mask, dtype=np.float32)
-        slot_pts = np.array(slot_polygon, dtype=np.float32)
-
-        all_pts = np.vstack([veh_pts, slot_pts])
-        min_x, min_y = all_pts.min(axis=0)
-        max_x, max_y = all_pts.max(axis=0)
         pad = 2
-        w = max(1, int(max_x - min_x) + 2 * pad)
-        h = max(1, int(max_y - min_y) + 2 * pad)
-        if w * h > 4_000_000:  # degenerate/far-apart polygons: skip rasterization, no overlap
-            return 0.0
-
-        offset = np.array([min_x - pad, min_y - pad], dtype=np.float32)
-        veh_local = (veh_pts - offset).astype(np.int32)
-        slot_local = (slot_pts - offset).astype(np.int32)
-
+        offset = np.floor(veh_pts.min(axis=0)) - pad
+        w, h = (np.ceil(veh_pts.max(axis=0) - offset) + pad + 1).astype(int)
+        if w * h > 4_000_000:  # degenerate mask: skip rasterization, no overlap
+            return None
         veh_mask = np.zeros((h, w), dtype=np.uint8)
-        slot_mask = np.zeros((h, w), dtype=np.uint8)
-        cv2.fillPoly(veh_mask, [veh_local], 1)
-        cv2.fillPoly(slot_mask, [slot_local], 1)
+        cv2.fillPoly(veh_mask, [(veh_pts - offset).astype(np.int32)], 1)
 
         if ground_band:
             cols = veh_mask.any(axis=0)
@@ -206,11 +204,22 @@ class SpatialEngine:
                 rows = np.arange(h)[:, None]
                 veh_mask &= ((rows >= lowest - band) & cols).astype(np.uint8)
 
-        veh_area = int(veh_mask.sum())
-        if veh_area == 0:
+        area = cv2.countNonZero(veh_mask)
+        if area == 0:
+            return None
+        return veh_mask, offset, area
+
+    @staticmethod
+    def raster_slot_overlap(raster, slot_polygon: List[List[int]]) -> float:
+        """Fraction of a `vehicle_raster` that lies inside `slot_polygon`. The slot is drawn
+        on the vehicle's own canvas only: overlap outside the vehicle is irrelevant."""
+        if raster is None:
             return 0.0
-        inter_area = int((veh_mask & slot_mask).sum())
-        return inter_area / veh_area
+        veh_mask, offset, area = raster
+        slot_local = (np.array(slot_polygon, dtype=np.float32) - offset).astype(np.int32)
+        slot_mask = np.zeros_like(veh_mask)
+        cv2.fillPoly(slot_mask, [slot_local], 1)
+        return cv2.countNonZero(cv2.bitwise_and(veh_mask, slot_mask)) / area
 
     @staticmethod
     def time_to_overlap(b1, v1, b2, v2, horizon: float, margin: float) -> Optional[float]:
@@ -300,12 +309,14 @@ class SpatialEngine:
             # Quick bbox-vs-slot-bbox rejection (vectorised) before the precise, costlier test.
             near = np.nonzero((slot_bounds[:, 2] >= bx1) & (slot_bounds[:, 0] <= bx2) &
                               (slot_bounds[:, 3] >= by1) & (slot_bounds[:, 1] <= by2))[0]
+            # Vehicle mask rasterized once per vehicle, then reused for every nearby slot.
+            raster = self.vehicle_raster(mask, 0.25 if self.oblique else None) if mask and len(near) else None
             for idx in near:
                 slot = active_slots[idx]
                 sid = slot["id"]
                 poly = slot["polygon"]
                 if mask:
-                    frac = self.slot_mask_overlap(mask, poly, ground_band=0.25 if self.oblique else None)
+                    frac = self.raster_slot_overlap(raster, poly)
                 else:
                     frac = self.slot_footprint_overlap(bbox, poly)
                 if frac >= PRESENCE_THRESHOLD:

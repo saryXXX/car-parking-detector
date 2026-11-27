@@ -13,6 +13,17 @@ import numpy as np
 import time
 
 
+def _centroid(polygon) -> tuple:
+    """int(np.mean(xs)), int(np.mean(ys)) -- without numpy's per-call overhead (~23 ms/frame
+    for 235 slots). Below 8 values numpy sums sequentially from 0.0, exactly like sum(), so
+    the result is identical; longer polygons keep np.mean (it switches to pairwise summation)."""
+    xs = [p[0] for p in polygon]
+    ys = [p[1] for p in polygon]
+    if len(xs) < 8:
+        return int(sum(xs) / len(xs)), int(sum(ys) / len(ys))
+    return int(np.mean(xs)), int(np.mean(ys))
+
+
 class ParkingVisualizer:
     # Modern, sleek color palette (BGR)
     COLOR_FREE = (46, 204, 113)         # Emerald Green
@@ -25,6 +36,8 @@ class ParkingVisualizer:
     COLOR_TRIPWIRE = (255, 200, 0)      # Cyan Accent
     COLOR_DOT = (0, 255, 255)           # Yellow Contact Dot
     COLOR_TEXT = (255, 255, 255)        # Clean White
+    # Slots / cars narrower than this get no text label (far rows of a wide oblique view).
+    MIN_LABEL_WIDTH_PX = 60
 
     def __init__(self, slot_definitions: List[Dict]):
         self.slot_defs = slot_definitions
@@ -56,6 +69,11 @@ class ParkingVisualizer:
         for stra in straddle_alerts:
             straddled_slots.update(stra.get("slot_ids", []))
 
+        # Outlines are batched into one polylines() call per colour (one call per slot was
+        # ~15 ms/frame with LINE_AA). Fills stay per slot: a single fillPoly over several
+        # polygons uses even-odd filling and would punch holes where slots overlap.
+        outlines: Dict[tuple, list] = {}
+        labels: list = []
         for slot in self.slot_defs:
             # Ne pas afficher si la place est hors champ suite au pan caméra
             if not slot.get("is_visible", True):
@@ -79,51 +97,56 @@ class ParkingVisualizer:
 
             # Polygone semi-transparent
             cv2.fillPoly(overlay, [pts], color)
-            cv2.polylines(vis_frame, [pts], True, color, 2, cv2.LINE_AA)
+            outlines.setdefault(color, []).append(pts)
 
-            cx = int(np.mean([p[0] for p in slot["polygon"]]))
-            cy = int(np.mean([p[1] for p in slot["polygon"]]))
+            cx, cy = _centroid(slot["polygon"])
 
-            # Label de la place (propre et centré)
+            # Far-away slots are too small to carry text without covering their neighbours;
+            # their colour already says free / occupied.
+            if np.ptp(pts[:, 0, 0]) < self.MIN_LABEL_WIDTH_PX:
+                continue
+
+            # Label de la place (propre et centré) -- queued, drawn on top of all outlines
             if sid in straddled_slots:
-                cv2.putText(vis_frame, f"{slot['name']} : BLOQUE", (cx - 45, cy),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 2, cv2.LINE_AA)
+                labels.append((f"{slot['name']} : BLOQUE", (cx - 45, cy), 0.42, (255, 255, 255), 2))
             elif not is_occ:
-                cv2.putText(vis_frame, f"{slot['name']} : LIBRE", (cx - 40, cy),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1, cv2.LINE_AA)
+                labels.append((f"{slot['name']} : LIBRE", (cx - 40, cy), 0.42, (255, 255, 255), 1))
             else:
                 car_id = d_info.get("car_id", "?")
                 mins, secs = divmod(int(elapsed), 60)
-                cv2.putText(vis_frame, f"{slot['name']} [Car #{car_id}]", (cx - 50, cy - 6),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1, cv2.LINE_AA)
-                cv2.putText(vis_frame, f"{mins:02d}m {secs:02d}s", (cx - 22, cy + 12),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 255, 255), 1, cv2.LINE_AA)
+                labels.append((f"{slot['name']} [Car #{car_id}]", (cx - 50, cy - 6), 0.42, (255, 255, 255), 1))
+                labels.append((f"{mins:02d}m {secs:02d}s", (cx - 22, cy + 12), 0.40, (0, 255, 255), 1))
+
+        for color, polys in outlines.items():
+            cv2.polylines(vis_frame, polys, True, color, 2, cv2.LINE_AA)
+        for text, org, scale, color, thick in labels:
+            cv2.putText(vis_frame, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, color, thick, cv2.LINE_AA)
 
         # Transparence douce pour les places
         cv2.addWeighted(overlay, 0.28, vis_frame, 0.72, 0, vis_frame)
 
         # 2. Dessin épuré des véhicules
+        # All silhouettes go on ONE overlay blended once (a full-frame copy + blend per car
+        # cost ~0.5 s/frame with 70 cars).
+        mask_polys = [np.array(v["mask"], np.int32).reshape((-1, 1, 2)) for v in tracked_vehicles if v.get("mask")]
+        if mask_polys:
+            mask_overlay = vis_frame.copy()
+            cv2.fillPoly(mask_overlay, mask_polys, (220, 200, 100))
+            cv2.addWeighted(mask_overlay, 0.25, vis_frame, 0.75, 0, vis_frame)
+            cv2.polylines(vis_frame, mask_polys, True, (220, 200, 100), 2, cv2.LINE_AA)
         for v in tracked_vehicles:
             x1, y1, x2, y2 = map(int, v["bbox"])
             px, py = int((x1 + x2) / 2), y2
-            mask = v.get("mask")
-
-            if mask:
-                # Real pixel silhouette from instance segmentation, not just the bbox.
-                pts = np.array(mask, np.int32).reshape((-1, 1, 2))
-                cv2.polylines(vis_frame, [pts], True, (220, 200, 100), 2, cv2.LINE_AA)
-                mask_overlay = vis_frame.copy()
-                cv2.fillPoly(mask_overlay, [pts], (220, 200, 100))
-                cv2.addWeighted(mask_overlay, 0.25, vis_frame, 0.75, 0, vis_frame)
-            else:
+            if not v.get("mask"):
                 # Rectangle véhicule fin et élégant
                 cv2.rectangle(vis_frame, (x1, y1), (x2, y2), (220, 200, 100), 1, cv2.LINE_AA)
 
             # Point de contact au sol
             cv2.circle(vis_frame, (px, py), 3, self.COLOR_DOT, -1, cv2.LINE_AA)
-            # Badge identifiant discret
-            cv2.putText(vis_frame, f"Car #{v['id']}", (x1, y1 - 4),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.38, (230, 230, 230), 1, cv2.LINE_AA)
+            # Badge identifiant discret (skipped on small, far cars where labels pile up)
+            if x2 - x1 >= self.MIN_LABEL_WIDTH_PX:
+                cv2.putText(vis_frame, f"Car #{v['id']}", (x1, y1 - 4),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.38, (230, 230, 230), 1, cv2.LINE_AA)
 
         # 3. Alertes à cheval sur la ligne (discret sur le véhicule fautif)
         for stra in straddle_alerts[:2]:
@@ -156,9 +179,10 @@ class ParkingVisualizer:
 
         # 5. Bandeau Supérieur HUD Professionnel (Anti-Clutter)
         hud_h = 56
-        hud_overlay = vis_frame.copy()
-        cv2.rectangle(hud_overlay, (0, 0), (w, hud_h), (18, 18, 18), -1)
-        cv2.addWeighted(hud_overlay, 0.85, vis_frame, 0.15, 0, vis_frame)
+        # Blend only the HUD strip (rows 0..hud_h, as the filled rectangle covered) instead of
+        # copying and blending the whole frame.
+        hud_strip = vis_frame[:hud_h + 1]
+        cv2.addWeighted(np.full_like(hud_strip, 18), 0.85, hud_strip, 0.15, 0, hud_strip)
         cv2.line(vis_frame, (0, hud_h), (w, hud_h), (60, 60, 60), 1)
 
         # Ligne 1 : Statistiques du parking

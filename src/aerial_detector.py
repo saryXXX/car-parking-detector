@@ -11,7 +11,6 @@ from __future__ import annotations
 import numpy as np
 import torch
 import torchvision
-from ultralytics import YOLO
 
 # COCO classes that a top-down car gets mistaken for, plus the real vehicle classes.
 COCO_TOPDOWN_VEHICLE = {"car", "truck", "bus", "cell phone", "remote", "suitcase", "skateboard",
@@ -24,7 +23,8 @@ class AerialVehicleDetector:
                  imgsz: int = 1024, conf: float = 0.05, nms_iou: float = 0.4,
                  min_side_frac: float = 0.016, max_side_frac: float = 0.085,
                  class_agnostic: bool | None = None):
-        self.model = YOLO(model_path)
+        from src.model_cache import get_yolo
+        self.model = get_yolo(model_path, "detect")  # loaded once per process
         names = self.model.names
         if class_agnostic is None:  # aerial-trained models already know "car"
             class_agnostic = "cell phone" in names.values()

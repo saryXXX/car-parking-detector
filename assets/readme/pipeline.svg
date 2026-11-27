@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 190" width="900" height="190" role="img" aria-label="Animated pipeline: a frame flows through motion compensation, detection, tracking, spatial engine, classifiers and the dashboard">
+  <style>
+    text { font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; text-anchor: middle; }
+    .t { fill: #e6edf3; font-size: 12px; font-weight: 700; }
+    .s { fill: #8b949e; font-size: 9.5px; }
+    .box { fill: #161b22; stroke: #30363d; stroke-width: 1.5; }
+  </style>
+  <rect width="900" height="190" rx="16" fill="#0d1117"/>
+  <rect x="0.5" y="0.5" width="899" height="189" rx="16" fill="none" stroke="#30363d"/>
+  <text x="450" y="24" fill="#8b949e" font-size="11">one video frame, end to end</text>
+
+  <!-- connector -->
+  <line x1="40" y1="92" x2="860" y2="92" stroke="#30363d" stroke-width="2"/>
+
+  <!-- 7 stages: width 108, step 122, first x=21 -->
+  <g>
+    <rect class="box" x="21" y="52" width="108" height="80" rx="10"/>
+    <rect x="21" y="52" width="108" height="80" rx="10" fill="none" stroke="#58a6ff" stroke-width="2.5" opacity="0">
+      <animate attributeName="opacity" values="0;1;0;0" keyTimes="0;0.04;0.14;1" dur="5s" repeatCount="indefinite"/></rect>
+    <text x="75" y="84" font-size="20">🎥</text><text class="t" x="75" y="106">Frame</text><text class="s" x="75" y="121">video · RTSP · drone</text>
+  </g>
+  <g>
+    <rect class="box" x="143" y="52" width="108" height="80" rx="10"/>
+    <rect x="143" y="52" width="108" height="80" rx="10" fill="none" stroke="#58a6ff" stroke-width="2.5" opacity="0">
+      <animate attributeName="opacity" values="0;0;1;0;0" keyTimes="0;0.12;0.17;0.28;1" dur="5s" repeatCount="indefinite"/></rect>
+    <text x="197" y="84" font-size="20">🧭</text><text class="t" x="197" y="106">GMC</text><text class="s" x="197" y="121">ORB + RANSAC</text>
+  </g>
+  <g>
+    <rect class="box" x="265" y="52" width="108" height="80" rx="10"/>
+    <rect x="265" y="52" width="108" height="80" rx="10" fill="none" stroke="#58a6ff" stroke-width="2.5" opacity="0">
+      <animate attributeName="opacity" values="0;0;1;0;0" keyTimes="0;0.26;0.31;0.42;1" dur="5s" repeatCount="indefinite"/></rect>
+    <text x="319" y="84" font-size="20">🚗</text><text class="t" x="319" y="106">Detect</text><text class="s" x="319" y="121">YOLOv8 · geo-trax</text>
+  </g>
+  <g>
+    <rect class="box" x="387" y="52" width="108" height="80" rx="10"/>
+    <rect x="387" y="52" width="108" height="80" rx="10" fill="none" stroke="#58a6ff" stroke-width="2.5" opacity="0">
+      <animate attributeName="opacity" values="0;0;1;0;0" keyTimes="0;0.40;0.45;0.56;1" dur="5s" repeatCount="indefinite"/></rect>
+    <text x="441" y="84" font-size="20">🎯</text><text class="t" x="441" y="106">Track</text><text class="s" x="441" y="121">ByteTrack IDs</text>
+  </g>
+  <g>
+    <rect class="box" x="509" y="52" width="108" height="80" rx="10"/>
+    <rect x="509" y="52" width="108" height="80" rx="10" fill="none" stroke="#58a6ff" stroke-width="2.5" opacity="0">
+      <animate attributeName="opacity" values="0;0;1;0;0" keyTimes="0;0.54;0.59;0.70;1" dur="5s" repeatCount="indefinite"/></rect>
+    <text x="563" y="84" font-size="20">🅿️</text><text class="t" x="563" y="106">Spatial</text><text class="s" x="563" y="121">slots · dwell · rules</text>
+  </g>
+  <g>
+    <rect class="box" x="631" y="52" width="108" height="80" rx="10"/>
+    <rect x="631" y="52" width="108" height="80" rx="10" fill="none" stroke="#58a6ff" stroke-width="2.5" opacity="0">
+      <animate attributeName="opacity" values="0;0;1;0;0" keyTimes="0;0.68;0.73;0.84;1" dur="5s" repeatCount="indefinite"/></rect>
+    <text x="685" y="84" font-size="20">🧠</text><text class="t" x="685" y="106">ML heads</text><text class="s" x="685" y="121">CNN · LightGBM</text>
+  </g>
+  <g>
+    <rect class="box" x="753" y="52" width="108" height="80" rx="10"/>
+    <rect x="753" y="52" width="108" height="80" rx="10" fill="none" stroke="#3fb950" stroke-width="2.5" opacity="0">
+      <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.82;0.87;0.97;1" dur="5s" repeatCount="indefinite"/></rect>
+    <text x="807" y="84" font-size="20">🖥️</text><text class="t" x="807" y="106">Dashboard</text><text class="s" x="807" y="121">overlay · alerts</text>
+  </g>
+
+  <!-- travelling packet -->
+  <line x1="75" y1="152" x2="807" y2="152" stroke="#30363d" stroke-width="1" stroke-dasharray="3 5"/>
+  <circle r="6" fill="#58a6ff">
+    <animateMotion dur="5s" repeatCount="indefinite" path="M 75 152 L 807 152" keyPoints="0;1;1" keyTimes="0;0.88;1" calcMode="linear"/>
+    <animate attributeName="fill" values="#58a6ff;#58a6ff;#3fb950" keyTimes="0;0.8;1" dur="5s" repeatCount="indefinite"/>
+  </circle>
+  <text x="450" y="176" fill="#8b949e" font-size="10">boxes → IDs → slot states → alerts, every frame</text>
+</svg>

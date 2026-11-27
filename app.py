@@ -5,8 +5,6 @@ slot-by-slot dwell times, lane obstruction alerts, bad parking detection,
 and separate Near-Miss vs Actual Collision scenarios.
 """
 
-import base64
-import json
 import os
 import time
 from pathlib import Path
@@ -17,10 +15,12 @@ import pandas as pd
 import streamlit as st
 import winsound
 
+from src import model_cache, replay_cache
+from src.pipeline import FramePipeline
 from src.spatial_engine import SpatialEngine
 from src.tracker import VehicleTracker
+from src.video_io import FrameReader, read_frame_at
 from src.visualizer import ParkingVisualizer
-from src.motion_compensator import CameraMotionCompensator
 
 
 st.set_page_config(
@@ -96,10 +96,13 @@ EPISODES = [
         # polygons sit entirely outside that frame (3x too large), so every slot read as
         # permanently out-of-view/empty. commercial_parking_zones.json is the correct,
         # zone-aware calibration. Slots A1-A9 / B1-B9 are traced from the painted bay lines
-        # (Hough), C1 is the white SUV by the kerb.
+        # (Hough), C1 is the white SUV by the kerb, P1-P54 are the other parked cars found by
+        # tools/auto_slots_oblique.py.
         "config": "configs/commercial_parking_zones.json",
         # Camera looks across the lot: slot / contact tests use each car's ground band.
         "oblique": True,
+        # Far rows are 30-40 px cars: YOLO at 640 sees ~38 cars per frame, at 1280 ~69.
+        "imgsz": 1280,
     },
     {
         "id": "r2", "badge": "4K", "kicker": "Real footage",
@@ -151,7 +154,6 @@ def draw_sim_background(width=1280, height=720):
     return bg
 
 
-@st.cache_data(show_spinner=False)
 def episode_frame(ep_id):
     ep = EP_BY_ID[ep_id]
     if "cars" in ep:
@@ -167,23 +169,37 @@ def episode_frame(ep_id):
         analytics = engine.update(tracked, current_time=time.time())
         return visualizer.render(bg, analytics, tracked, fps=30.0)
     if ep.get("video") and os.path.exists(ep["video"]):
-        cap = cv2.VideoCapture(ep["video"])
-        cap.set(cv2.CAP_PROP_POS_FRAMES, 90)
-        ok, frame = cap.read()
-        cap.release()
-        return frame if ok else None
+        return read_frame_at(ep["video"], 90)
     return None
+
+
+# Thumbnails are written once to static/thumbs/ and served by Streamlit's static file server
+# (server.enableStaticServing). Before, each one cost a 4K seek (~1.2-3 s) after every server
+# restart, and all of them were re-sent as inline base64 on every rerun.
+THUMB_DIR = Path("static/thumbs")
+THUMB_WIDTHS = (480, 1280)
+
+
+def _thumb_sig(ep_id):
+    src = EP_BY_ID[ep_id].get("video") or "src/visualizer.py"  # sim thumbnails follow the renderer
+    return f"{int(os.path.getmtime(src))}" if os.path.exists(src) else "0"
 
 
 @st.cache_data(show_spinner=False)
 def episode_image(ep_id, width):
-    frame = episode_frame(ep_id)
-    if frame is None:
-        return None
-    h, w = frame.shape[:2]
-    frame = cv2.resize(frame, (width, int(h * width / w)), interpolation=cv2.INTER_AREA)
-    _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 82])
-    return "data:image/jpeg;base64," + base64.b64encode(buf).decode()
+    """Relative URL of the episode thumbnail at `width`, generated on first use."""
+    sig = _thumb_sig(ep_id)
+    paths = {w: THUMB_DIR / f"{ep_id}_{w}_{sig}.jpg" for w in THUMB_WIDTHS}
+    if not paths[width].exists():
+        frame = episode_frame(ep_id)
+        if frame is None:
+            return None
+        THUMB_DIR.mkdir(parents=True, exist_ok=True)
+        h, w = frame.shape[:2]
+        for tw, path in paths.items():  # one decode serves every size
+            small = cv2.resize(frame, (tw, int(h * tw / w)), interpolation=cv2.INTER_AREA)
+            cv2.imwrite(str(path), small, [cv2.IMWRITE_JPEG_QUALITY, 82])
+    return f"./app/static/thumbs/{paths[width].name}"
 
 
 st.session_state.setdefault("selected", "e5")
@@ -329,6 +345,13 @@ with nav_settings:
         )
         collision_mode = {"Règles": "rule", "ML": "ml"}[collision_mode_label]
 
+# Load the default detectors and run one dummy inference in the background as soon as the app
+# opens: the cold start (CUDA init + weights, ~15-20 s) used to land on the first Play click.
+# Runs once per server process; later reruns are no-ops.
+_warm_specs = [(model_choice, "track", 1280)] if os.path.exists(model_choice) else []
+_warm_specs += [(ep["model"], "detect", 1280) for ep in EPISODES if ep.get("aerial") and os.path.exists(ep["model"])]
+model_cache.start_warmup(_warm_specs)
+
 
 def render_card(ep):
     img = episode_image(ep["id"], 480)
@@ -423,12 +446,14 @@ def render_player(ep):
     metrics = [col.empty() for col in st.columns(5, gap="small")]
     col_video, col_side = st.columns([7, 3], gap="medium")
     with col_video:
+        status = st.empty()   # analysis progress / replay info
         video = st.empty()
+        seek = st.empty()     # "start from" slider, replays only
         alerts = st.empty()
     with col_side:
         st.markdown('<div class="pw-side-title">Slot status</div>', unsafe_allow_html=True)
         table = st.empty()
-    return metrics, video, table, alerts
+    return metrics, video, table, alerts, status, seek
 
 
 episode = EP_BY_ID[st.session_state.selected]
@@ -437,7 +462,7 @@ with st.empty().container():
     if st.session_state.playing:
         (
             (metric_free, metric_occ, metric_rate, metric_entries, metric_incidents),
-            video_placeholder, table_placeholder, alert_placeholder,
+            video_placeholder, table_placeholder, alert_placeholder, status_placeholder, seek_placeholder,
         ) = render_player(episode)
     else:
         render_browse(episode)
@@ -452,11 +477,83 @@ elif episode["id"] == "webcam":
     config_file = st.session_state.get("webcam_config", UPLOAD_CONFIGS[0])
 
 
-def run_dashboard():
-    if not os.path.exists(config_file):
-        st.error(f"Fichier de configuration '{config_file}' introuvable.")
-        return
+JPEG_QUALITY = 85
+PANEL_REFRESH_S = 0.5  # metrics + slot table: ~2 Hz instead of every frame
 
+
+def encode_jpeg(bgr: np.ndarray) -> bytes:
+    # Encoded once here; st.image passes JPEG bytes straight through (no re-encode), and the
+    # same bytes are what the replay cache stores.
+    return cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])[1].tobytes()
+
+
+class PlayerUI:
+    """Pushes frames to the page every time, but the metrics and the slot table (a full
+    dataframe re-sent to the browser) only ~2x per second, and alerts only when they change."""
+
+    def __init__(self, slots):
+        self.slots = slots  # [(slot_id, name), ...]
+        self._last_panel = 0.0
+        self._last_alert = None
+
+    def show(self, jpeg: bytes, rec: dict, force: bool = False):
+        video_placeholder.image(jpeg, width="stretch")
+        now = time.perf_counter()
+        if force or now - self._last_panel >= PANEL_REFRESH_S:
+            self._last_panel = now
+            self._panel(rec)
+        alert = self._alert(rec)
+        if alert != self._last_alert:
+            self._last_alert = alert
+            if alert is None:
+                alert_placeholder.empty()
+            elif alert[0] == "error":
+                alert_placeholder.error(alert[1])
+            else:
+                alert_placeholder.warning(alert[1])
+
+    def _panel(self, rec):
+        incidents = len(rec["obstructions"]) + len(rec["straddles"]) + len(rec["collisions"])
+        metric_free.metric("Places Libres", f"{rec['free']} / {rec['total']}")
+        metric_occ.metric("Places Occupées", f"{rec['occ']}")
+        metric_rate.metric("Taux d'Occupation", f"{rec['rate']:.1f} %")
+        metric_entries.metric("Véhicules Entrés", f"{rec['entries']}")
+        metric_incidents.metric("Incidents Détectés", f"{incidents}")
+
+        occupied = set(rec["occupied"])
+        rows = []
+        for sid, name in self.slots:
+            if sid in occupied:
+                car_id, elapsed = rec["dwell"].get(str(sid), [None, 0.0])
+                mins, secs = divmod(int(elapsed), 60)
+                rows.append({"Place": name, "État": "🔴 Occupée",
+                             "Véhicule": f"Car #{car_id}" if car_id else "-",
+                             "Temps Stationné": f"{mins:02d}m {secs:02d}s"})
+            else:
+                rows.append({"Place": name, "État": "🟢 Libre", "Véhicule": "-", "Temps Stationné": "-"})
+        table_placeholder.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+
+    @staticmethod
+    def _alert(rec):
+        errors, warnings = [], []
+        for col in rec["collisions"]:  # COLLISION (highest priority)
+            if col["type"] == "COLLISION":
+                errors.append(f"🚨💥 **COLLISION CONFIRMÉE** entre **Car #{col['car1_id']}** x **Car #{col['car2_id']}** !")
+            else:
+                warnings.append(f"⚠️⚡ **RISQUE D'ACCROCHAGE DÉTECTÉ** : **Car #{col['car1_id']}** ↔ **Car #{col['car2_id']}** — Rapprochement d'urgence détecté !")
+        for stra in rec["straddles"]:
+            slots_str = ", ".join(f"Slot {sid:02d}" for sid in stra["slot_ids"])
+            errors.append(f"⛔ **MAUVAIS STATIONNEMENT** : **Car #{stra['car_id']}** à cheval sur {slots_str} !")
+        for alt in rec["obstructions"]:
+            warnings.append(f"⚠️ **VOIE BLOQUÉE** : **Car #{alt['car_id']}** immobilisé ({alt['duration']:.1f}s)")
+        if errors:
+            return ("error", " | ".join(errors))
+        if warnings:
+            return ("warning", " | ".join(warnings[:2]))  # max 2 warnings
+        return None
+
+
+def build_engine():
     slot_classifier = None
     if occupancy_mode != "rule" and slot_weights_exist:
         from src.slot_classifier import SlotClassifier
@@ -466,44 +563,26 @@ def run_dashboard():
     # px_per_metre (explicit > calibrated via src/calibrate.py --ref-metres > 75px/m
     # fallback) and hand the ML model the SAME scale, instead of each guessing separately.
     engine = SpatialEngine(config_path=config_file, occupancy_mode=occupancy_mode,
-                            slot_classifier=slot_classifier, collision_mode=collision_mode,
-                            top_down=episode.get("aerial", False),
-                            oblique=episode.get("oblique", False))
-
+                           slot_classifier=slot_classifier, collision_mode=collision_mode,
+                           top_down=episode.get("aerial", False),
+                           oblique=episode.get("oblique", False))
     if collision_mode == "ml" and collision_weights_exist:
         from src.collision_model import CollisionModel
         engine.collision_model = CollisionModel(collision_weights_path,
-                                                  pixel_to_metre_scale=1.0 / engine.px_per_metre)
+                                                pixel_to_metre_scale=1.0 / engine.px_per_metre)
+    return engine
 
+
+def wait_for_models():
+    if not model_cache.warmup_ready():
+        with status_placeholder, st.spinner("Warming up the detector on the GPU (first run after start-up only)…"):
+            model_cache.wait_warmup()
+
+
+def run_simulation():
+    engine = build_engine()
     visualizer = ParkingVisualizer(slot_definitions=engine.slots)
-
-    tracker = None
-    cap = None
-    live_source = None  # non-None only for webcam/RTSP: enables reconnect-on-drop below
-
-    if "Scénario" in source_type:
-        pass  # Mode simulation cinématique directe
-    elif "Webcam" in source_type:
-        live_source = st.session_state.get("webcam_url", "").strip() or 0
-        cap = cv2.VideoCapture(live_source)
-        if not cap.isOpened():
-            st.error(f"Impossible d'ouvrir la source live '{live_source}'.")
-            return
-        tracker = VehicleTracker(model_name=model_choice, conf_threshold=conf_thresh)
-    else:
-        if not video_path or not os.path.exists(video_path):
-            st.warning("Vidéo introuvable ou non sélectionnée.")
-            return
-        cap = cv2.VideoCapture(video_path)
-        ep_model = episode.get("model")
-        if ep_model and os.path.exists(ep_model):
-            st.caption(f"Detector for this video: `{ep_model}` (aerial)")
-        else:
-            ep_model = model_choice
-        tracker = VehicleTracker(model_name=ep_model, conf_threshold=conf_thresh,
-                                 aerial=episode.get("aerial", False),
-                                 fps=cap.get(cv2.CAP_PROP_FPS) or 30.0)
-
+    ui = PlayerUI([(s["id"], s["name"]) for s in engine.slots])
     frame_idx = 0
     width, height = 1280, 720
 
@@ -515,277 +594,295 @@ def run_dashboard():
     collision_occurred = False
     collision_sound_played = False
 
-    gmc = CameraMotionCompensator(max_features=500)
-    video_t0 = time.time()  # recorded videos: timestamps = start time + position in the file
-    base_slots = [dict(s) for s in engine.slots]
-    base_lane_zones = [dict(lz) for lz in engine.lane_zones]
-
     while True:
         curr_time = time.time()
+        # Rendu du fond de plan parking 2D propre (Voie de circulation + Marquage)
+        bg = draw_sim_background(width, height)
 
-        if "Scénario" in source_type:
-            # Rendu du fond de plan parking 2D propre (Voie de circulation + Marquage)
-            bg = draw_sim_background(width, height)
+        tracked = []
 
-            tracked = []
+        if "Scénario 1" in source_type:
+            # Stationnement régulier : Car 101 avance puis tourne dans Slot 01 (190, 190)
+            if frame_idx < 40:
+                car_101["x"] += (190.0 - 50.0) / 40.0
+                car_101["y"] = 360.0
+            elif frame_idx < 80:
+                car_101["x"] = 190.0
+                car_101["y"] -= (360.0 - 190.0) / 40.0
+            else:
+                car_101["x"] = 190.0
+                car_101["y"] = 190.0
+            active_cars = [car_101, car_102]
 
-            if "Scénario 1" in source_type:
-                # Stationnement régulier : Car 101 avance puis tourne dans Slot 01 (190, 190)
-                if frame_idx < 40:
-                    car_101["x"] += (190.0 - 50.0) / 40.0
-                    car_101["y"] = 360.0
-                elif frame_idx < 80:
-                    car_101["x"] = 190.0
-                    car_101["y"] -= (360.0 - 190.0) / 40.0
-                else:
-                    car_101["x"] = 190.0
-                    car_101["y"] = 190.0
-                active_cars = [car_101, car_102]
+        elif "Scénario 2" in source_type:
+            # À cheval sur la ligne : Car 104 s'arrête à x=270, pile entre Slot 04 et Slot 05
+            if frame_idx < 45:
+                car_104["x"] += (270.0 - 60.0) / 45.0
+                car_104["y"] = 360.0
+            elif frame_idx < 85:
+                car_104["x"] = 270.0
+                car_104["y"] += (530.0 - 360.0) / 40.0
+            else:
+                car_104["x"] = 270.0
+                car_104["y"] = 530.0
+            active_cars = [car_104]
 
-            elif "Scénario 2" in source_type:
-                # À cheval sur la ligne : Car 104 s'arrête à x=270, pile entre Slot 04 et Slot 05
-                if frame_idx < 45:
-                    car_104["x"] += (270.0 - 60.0) / 45.0
-                    car_104["y"] = 360.0
-                elif frame_idx < 85:
-                    car_104["x"] = 270.0
-                    car_104["y"] += (530.0 - 360.0) / 40.0
-                else:
-                    car_104["x"] = 270.0
-                    car_104["y"] = 530.0
-                active_cars = [car_104]
+        elif "Scénario 3" in source_type:
+            # Near-Miss : Car 101 recule de Slot 01 vers l'allée, aperçoit Car 105 et freine à frame 45 (y=295)
+            if frame_idx == 0:
+                car_101["x"], car_101["y"] = 190.0, 190.0
+            car_105["x"] += 5.0
+            if 15 <= frame_idx < 45:
+                car_101["y"] += 3.5
+            elif frame_idx >= 45:
+                car_101["y"] = 295.0  # Freinage d'urgence !
+            active_cars = [car_101, car_105]
 
-            elif "Scénario 3" in source_type:
-                # Near-Miss : Car 101 recule de Slot 01 vers l'allée, aperçoit Car 105 et freine à frame 45 (y=295)
-                if frame_idx == 0:
-                    car_101["x"], car_101["y"] = 190.0, 190.0
+        elif "Scénario 4" in source_type:
+            # Near-Miss : Car 101 recule sans regarder jusqu'au centre de la voie (y=360)
+            if frame_idx == 0:
+                car_101["x"], car_101["y"] = 190.0, 190.0
+            if not collision_occurred:
                 car_105["x"] += 5.0
-                if 15 <= frame_idx < 45:
-                    car_101["y"] += 3.5
-                elif frame_idx >= 45:
-                    car_101["y"] = 295.0  # Freinage d'urgence !
-                active_cars = [car_101, car_105]
+                if frame_idx >= 15 and car_101["y"] < 360.0:
+                    car_101["y"] += 4.5
+                if abs(car_105["x"] - car_101["x"]) < 65 and abs(car_105["y"] - car_101["y"]) < 45:
+                    collision_occurred = True
+            active_cars = [car_101, car_105]
 
-            elif "Scénario 4" in source_type:
-                # Near-Miss : Car 101 recule sans regarder jusqu'au centre de la voie (y=360)
-                if frame_idx == 0:
-                    car_101["x"], car_101["y"] = 190.0, 190.0
-                if not collision_occurred:
-                    car_105["x"] += 5.0
-                    if frame_idx >= 15 and car_101["y"] < 360.0:
-                        car_101["y"] += 4.5
-                    if abs(car_105["x"] - car_101["x"]) < 65 and abs(car_105["y"] - car_101["y"]) < 45:
-                        collision_occurred = True
-                active_cars = [car_101, car_105]
+        elif "Scénario 5" in source_type:
+            # REAL COLLISION : Car 101 reverses from parking INTO lane, Car 105 drives through lane
+            if frame_idx == 0:
+                car_101["x"], car_101["y"] = 190.0, 190.0
+                car_105["x"] = 50.0
+                car_105["y"] = 360.0  # Car 105 in the lane
 
-            elif "Scénario 5" in source_type:
-                # REAL COLLISION : Car 101 reverses from parking INTO lane, Car 105 drives through lane
-                if frame_idx == 0:
-                    car_101["x"], car_101["y"] = 190.0, 190.0
-                    car_105["x"] = 50.0
-                    car_105["y"] = 360.0  # Car 105 in the lane
+            if not collision_occurred:
+                # Car 105 drives RIGHT through the lane (x-axis along y=360)
+                car_105["x"] += 3.5
 
-                if not collision_occurred:
-                    # Car 105 drives RIGHT through the lane (x-axis along y=360)
-                    car_105["x"] += 3.5
+                # Car 101 GRADUALLY reverses INTO the lane (y → 360)
+                if frame_idx >= 15:
+                    car_101["y"] += 2.5
 
-                    # Car 101 GRADUALLY reverses INTO the lane (y → 360)
-                    if frame_idx >= 15:
-                        car_101["y"] += 2.5
-
-                    # Distance on x-axis (when both reach same y=360)
-                    x_dist = abs(car_105["x"] - car_101["x"])
-                    y_dist = abs(car_105["y"] - car_101["y"])
-
-                    # COLLISION: when Car 101 reaches lane AND cars are getting close
-                    # Trigger EARLY before overlap: y_dist < 60 AND x_dist < 180
-                    if frame_idx >= 30 and y_dist < 60 and x_dist < 180:
-                        collision_occurred = True
-
-                # After collision: both cars stay stopped
-
-                active_cars = [car_101, car_105]
-
-            for c in active_cars:
-                cx, cy = int(c["x"]), int(c["y"])
-                w, h = 80, 110
-                bbox = (cx - w // 2, cy - h // 2, cx + w // 2, cy + h // 2)
-                tracked.append({"id": c["id"], "bbox": bbox, "conf": 0.95, "cls_name": "car"})
-
-                # Red color when collision occurs
-                if collision_occurred:
-                    color = (0, 0, 255)  # Red for collision
-                else:
-                    color = (80, 80, 200)  # Normal blue
-
-                cv2.rectangle(bg, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), color, -1)
-
-            analytics = engine.update(tracked, current_time=curr_time)
-            vis = visualizer.render(bg, analytics, tracked, fps=30.0)
-
-            if "Scénario 5" in source_type:
+                # Distance on x-axis (when both reach same y=360)
                 x_dist = abs(car_105["x"] - car_101["x"])
                 y_dist = abs(car_105["y"] - car_101["y"])
-                impact_pt = (int((car_101["x"] + car_105["x"]) / 2), 360)
 
-                if collision_occurred:
-                    # FULL COLLISION: Red pulse + alert
-                    pulse = int((frame_idx % 8) * 5)
-                    cv2.circle(vis, impact_pt, 40 + pulse, (0, 0, 255), 3, cv2.LINE_AA)
-                    cv2.circle(vis, impact_pt, 60 + pulse, (0, 0, 255), 2, cv2.LINE_AA)
+                # COLLISION: when Car 101 reaches lane AND cars are getting close
+                # Trigger EARLY before overlap: y_dist < 60 AND x_dist < 180
+                if frame_idx >= 30 and y_dist < 60 and x_dist < 180:
+                    collision_occurred = True
 
-                    # Play collision sound (only once)
-                    if not collision_sound_played:
-                        try:
-                            winsound.Beep(1000, 300)  # 1000Hz beep for 300ms
-                            collision_sound_played = True
-                        except:
-                            pass
+            # After collision: both cars stay stopped
 
-                    # Blinking collision warning box - LARGE with solid background
-                    if int((frame_idx % 10) / 5) == 0:
-                        # Solid red background box
-                        cv2.rectangle(vis, (50, 280), (950, 380), (0, 0, 200), -1)
-                        # White border
-                        cv2.rectangle(vis, (50, 280), (950, 380), (255, 255, 255), 3)
-                        # Text
-                        cv2.putText(vis, "COLLISION DETECTEE - VOIE BLOQUEE",
-                                   (70, 345), cv2.FONT_HERSHEY_SIMPLEX, 1.4, (255, 255, 255), 3)
+            active_cars = [car_101, car_105]
 
-                elif y_dist < 40 and 50 < x_dist < 130:
-                    # NEAR-MISS: Orange warning pulse (cars getting close)
-                    pulse = int((frame_idx % 6) * 4)
-                    cv2.circle(vis, impact_pt, 30 + pulse, (0, 165, 255), 3, cv2.LINE_AA)
-                    cv2.circle(vis, impact_pt, 60 + pulse, (0, 165, 255), 2, cv2.LINE_AA)
-                    cv2.putText(vis, "RAPPROCHEMENT DANGEREUX", (impact_pt[0] - 180, impact_pt[1] - 50),
-                               cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 165, 255), 3)
+        for c in active_cars:
+            cx, cy = int(c["x"]), int(c["y"])
+            w, h = 80, 110
+            bbox = (cx - w // 2, cy - h // 2, cx + w // 2, cy + h // 2)
+            tracked.append({"id": c["id"], "bbox": bbox, "conf": 0.95, "cls_name": "car"})
 
-            elif collision_occurred:
-                # Other scenarios: just show pulse ring
+            # Red color when collision occurs
+            if collision_occurred:
+                color = (0, 0, 255)  # Red for collision
+            else:
+                color = (80, 80, 200)  # Normal blue
+
+            cv2.rectangle(bg, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), color, -1)
+
+        analytics = engine.update(tracked, current_time=curr_time)
+        vis = visualizer.render(bg, analytics, tracked, fps=30.0)
+
+        if "Scénario 5" in source_type:
+            x_dist = abs(car_105["x"] - car_101["x"])
+            y_dist = abs(car_105["y"] - car_101["y"])
+            impact_pt = (int((car_101["x"] + car_105["x"]) / 2), 360)
+
+            if collision_occurred:
+                # FULL COLLISION: Red pulse + alert
                 pulse = int((frame_idx % 8) * 5)
-                impact_pt = (int((car_101["x"] + car_105["x"]) / 2), 360)
                 cv2.circle(vis, impact_pt, 40 + pulse, (0, 0, 255), 3, cv2.LINE_AA)
+                cv2.circle(vis, impact_pt, 60 + pulse, (0, 0, 255), 2, cv2.LINE_AA)
 
-        else:
+                # Play collision sound (only once)
+                if not collision_sound_played:
+                    try:
+                        winsound.Beep(1000, 300)  # 1000Hz beep for 300ms
+                        collision_sound_played = True
+                    except:
+                        pass
+
+                # Blinking collision warning box - LARGE with solid background
+                if int((frame_idx % 10) / 5) == 0:
+                    # Solid red background box
+                    cv2.rectangle(vis, (50, 280), (950, 380), (0, 0, 200), -1)
+                    # White border
+                    cv2.rectangle(vis, (50, 280), (950, 380), (255, 255, 255), 3)
+                    # Text
+                    cv2.putText(vis, "COLLISION DETECTEE - VOIE BLOQUEE",
+                               (70, 345), cv2.FONT_HERSHEY_SIMPLEX, 1.4, (255, 255, 255), 3)
+
+            elif y_dist < 40 and 50 < x_dist < 130:
+                # NEAR-MISS: Orange warning pulse (cars getting close)
+                pulse = int((frame_idx % 6) * 4)
+                cv2.circle(vis, impact_pt, 30 + pulse, (0, 165, 255), 3, cv2.LINE_AA)
+                cv2.circle(vis, impact_pt, 60 + pulse, (0, 165, 255), 2, cv2.LINE_AA)
+                cv2.putText(vis, "RAPPROCHEMENT DANGEREUX", (impact_pt[0] - 180, impact_pt[1] - 50),
+                           cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 165, 255), 3)
+
+        elif collision_occurred:
+            # Other scenarios: just show pulse ring
+            pulse = int((frame_idx % 8) * 5)
+            impact_pt = (int((car_101["x"] + car_105["x"]) / 2), 360)
+            cv2.circle(vis, impact_pt, 40 + pulse, (0, 0, 255), 3, cv2.LINE_AA)
+
+        ui.show(encode_jpeg(vis), replay_cache.ui_record(analytics))
+        frame_idx += 1
+        time.sleep(0.03)  # simulations render in ~ms: pace them to ~25 fps
+
+
+def run_live():
+    live_source = st.session_state.get("webcam_url", "").strip() or 0
+    cap = cv2.VideoCapture(live_source)
+    if not cap.isOpened():
+        st.error(f"Impossible d'ouvrir la source live '{live_source}'.")
+        return
+    wait_for_models()
+    engine = build_engine()
+    tracker = VehicleTracker(model_name=model_choice, conf_threshold=conf_thresh)
+    pipe = FramePipeline(engine, tracker, ParkingVisualizer(slot_definitions=engine.slots))
+    ui = PlayerUI([(s["id"], s["name"]) for s in engine.slots])
+    status_placeholder.caption(f"🔴 Live · {live_source}")
+    try:
+        while True:
             ret, frame = cap.read()
             if not ret:
-                if live_source is not None:
-                    # Live feed dropped a frame / connection hiccup: reconnect instead of ending.
-                    cap.release()
-                    time.sleep(1.0)
-                    cap = cv2.VideoCapture(live_source)
-                    if not cap.isOpened():
-                        st.warning(f"Flux live '{live_source}' indisponible, nouvelle tentative...")
-                    continue
-                st.info("Flux vidéo terminé.")
-                break
-
-            if live_source is None:
-                # Recorded file: use the video clock. Processing runs slower than real time,
-                # so wall-clock time would shrink every speed (and stretch dwell times).
-                curr_time = video_t0 + cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
-
+                # Live feed dropped a frame / connection hiccup: reconnect instead of ending.
+                cap.release()
+                time.sleep(1.0)
+                cap = cv2.VideoCapture(live_source)
+                if not cap.isOpened():
+                    st.warning(f"Flux live '{live_source}' indisponible, nouvelle tentative...")
+                continue
             if frame.shape[1] > 1280:
                 frame = cv2.resize(frame, (1280, 720))
-
-            gmc.update(frame)
-            zone_info = gmc.get_active_zone_info()
-            comp_slots = gmc.transform_polygons(base_slots, frame_width=frame.shape[1], frame_height=frame.shape[0])
-            engine.set_dynamic_slots(comp_slots)
-            visualizer.set_dynamic_slots(comp_slots)
-            if base_lane_zones:
-                comp_lane_zones = gmc.transform_polygons(base_lane_zones, frame_width=frame.shape[1], frame_height=frame.shape[0])
-                engine.set_dynamic_lane_zones(comp_lane_zones)
-
-            tracked = tracker.track(frame)
-            analytics = engine.update(tracked, current_time=curr_time, camera_dx=gmc.camera_dx,
-                                       camera_dy=gmc.camera_dy, frame=frame,
-                                       ground_H=gmc.accumulated_H)
-            vis = visualizer.render(frame, analytics, tracked, zone_info=zone_info, fps=30.0)
-
-        # KPIs
-        total = analytics["total_slots"]
-        free = analytics["free_count"]
-        occ = analytics["occupied_count"]
-        rate = analytics["occupancy_rate"]
-        entries = analytics.get("total_entries", 0)
-        alerts = analytics.get("obstruction_alerts", [])
-        straddles = analytics.get("line_straddle_alerts", [])
-        collisions = analytics.get("collision_alerts", [])
-        total_incidents = len(alerts) + len(straddles) + len(collisions)
-
-        metric_free.metric("Places Libres", f"{free} / {total}")
-        metric_occ.metric("Places Occupées", f"{occ}")
-        metric_rate.metric("Taux d'Occupation", f"{rate:.1f} %")
-        metric_entries.metric("Véhicules Entrés", f"{entries}")
-        metric_incidents.metric("Incidents Détectés", f"{total_incidents}")
-
-        # Rendu image Streamlit
-        vis_rgb = cv2.cvtColor(vis, cv2.COLOR_BGR2RGB)
-        video_placeholder.image(vis_rgb, channels="RGB", use_container_width=True)
-
-        # Table des places
-        dwell = analytics.get("dwell_data", {})
-        states = analytics.get("states", {})
-        table_rows = []
-        for slot in engine.slots:
-            sid = slot["id"]
-            is_occ = states.get(sid, False)
-            d_info = dwell.get(sid, {})
-            elapsed_sec = int(d_info.get("elapsed_seconds", 0))
-            mins, secs = divmod(elapsed_sec, 60)
-            car_id = d_info.get("car_id", "-")
-
-            status_str = "🔴 Occupée" if is_occ else "🟢 Libre"
-            dwell_str = f"{mins:02d}m {secs:02d}s" if is_occ else "-"
-
-            table_rows.append({
-                "Place": slot["name"],
-                "État": status_str,
-                "Véhicule": f"Car #{car_id}" if car_id else "-",
-                "Temps Stationné": dwell_str
-            })
-
-        table_df = pd.DataFrame(table_rows)
-        table_placeholder.dataframe(table_df, use_container_width=True, hide_index=True)
-
-        # Bannières d'alertes avec tous les incidents visibles
-        alert_messages = []
-
-        # COLLISION (Highest Priority)
-        for col in collisions:
-            if col["type"] == "COLLISION":
-                alert_messages.append(("error", f"🚨💥 **COLLISION CONFIRMÉE** entre **Car #{col['car1_id']}** x **Car #{col['car2_id']}** !"))
-            else:
-                # NEAR-MISS (Very Visible)
-                alert_messages.append(("warning", f"⚠️⚡ **RISQUE D'ACCROCHAGE DÉTECTÉ** : **Car #{col['car1_id']}** ↔ **Car #{col['car2_id']}** — Rapprochement d'urgence détecté !"))
-
-        # STRADDLE (High Priority)
-        for stra in straddles:
-            slots_str = ", ".join([f"Slot {sid:02d}" for sid in stra["slot_ids"]])
-            alert_messages.append(("error", f"⛔ **MAUVAIS STATIONNEMENT** : **Car #{stra['car_id']}** à cheval sur {slots_str} !"))
-
-        # LANE OBSTRUCTION (Medium Priority)
-        for alt in alerts:
-            alert_messages.append(("warning", f"⚠️ **VOIE BLOQUÉE** : **Car #{alt['car_id']}** immobilisé ({alt['duration']:.1f}s)"))
-
-        # Display all alerts (errors first, then warnings)
-        if alert_messages:
-            errors = [msg for typ, msg in alert_messages if typ == "error"]
-            warnings = [msg for typ, msg in alert_messages if typ == "warning"]
-
-            if errors:
-                alert_placeholder.error(" | ".join(errors))
-            elif warnings:
-                alert_placeholder.warning(" | ".join(warnings[:2]))  # Show max 2 warnings
-        else:
-            alert_placeholder.empty()
-
-        frame_idx += 1
-        time.sleep(0.03)
-
-    if cap:
+            vis, analytics, _ = pipe.process(frame, time.time())
+            ui.show(encode_jpeg(vis), replay_cache.ui_record(analytics))
+    finally:
         cap.release()
+        pipe.close()
+
+
+def run_video(path):
+    ep_model = episode.get("model")
+    if ep_model and os.path.exists(ep_model):
+        st.caption(f"Detector for this video: `{ep_model}` (aerial)")
+    else:
+        ep_model = model_choice
+    imgsz = episode.get("imgsz", 640)
+    key = replay_cache.make_key(
+        path, config_file, ep_model,
+        extra_files=[slot_weights_path if occupancy_mode != "rule" else None,
+                     collision_weights_path if collision_mode == "ml" else None],
+        conf=conf_thresh, imgsz=imgsz, aerial=episode.get("aerial", False),
+        oblique=episode.get("oblique", False), occupancy=occupancy_mode, collision=collision_mode,
+    )
+    replay = replay_cache.load(key)
+    if replay is not None:
+        play_replay(replay, key)
+    else:
+        analyse_and_record(path, key, ep_model, imgsz)
+
+
+def play_replay(replay, key):
+    """Stream a recorded analysis at the clip's own frame rate (frames are dropped, not
+    slowed down, if the browser can't keep up)."""
+    n, fps = replay.frame_count, replay.fps
+    duration = n / fps
+    start_s = seek_placeholder.slider("Start from (s)", 0.0, max(0.1, round(duration, 1)), 0.0, 0.5,
+                                      key=f"seek_{episode['id']}")
+    status_placeholder.caption(f"⚡ Cached analysis · replaying at {fps:.0f} fps · {n} frames "
+                               "(settings or code changes trigger a fresh analysis)")
+    ui = PlayerUI([tuple(s) for s in replay.meta["slots"]])
+    i = min(n - 1, int(start_s * fps))
+    t0 = time.perf_counter() - i / fps
+    try:
+        while i < n:
+            lag = time.perf_counter() - (t0 + i / fps)
+            if lag < 0:
+                time.sleep(-lag)
+            elif lag > 2 / fps:  # running late: jump to the frame that is due now
+                i = min(n - 1, int((time.perf_counter() - t0) * fps))
+            ui.show(replay.frame(i), replay.records[i], force=(i == n - 1))
+            i += 1
+        st.info("Flux vidéo terminé.")
+    finally:
+        replay.close()
+
+
+def analyse_and_record(path, key, ep_model, imgsz):
+    reader = FrameReader(path)
+    if not reader.isOpened():
+        reader.release()
+        st.warning("Vidéo introuvable ou illisible.")
+        return
+    wait_for_models()
+    engine = build_engine()
+    tracker = VehicleTracker(model_name=ep_model, conf_threshold=conf_thresh,
+                             aerial=episode.get("aerial", False), fps=reader.fps, imgsz=imgsz)
+    pipe = FramePipeline(engine, tracker, ParkingVisualizer(slot_definitions=engine.slots))
+    slots = [(s["id"], s["name"]) for s in engine.slots]
+    ui = PlayerUI(slots)
+    writer = replay_cache.ReplayWriter(key, meta={"fps": reader.fps, "slots": slots,
+                                                  "video": os.path.basename(path)})
+    total = reader.frame_count
+    # Recorded file: use the video clock. Processing runs slower than real time,
+    # so wall-clock time would shrink every speed (and stretch dwell times).
+    video_t0 = time.time()
+    started, last_status, done = time.perf_counter(), 0.0, 0
+    try:
+        while True:
+            ok, frame, pos_ms = reader.read()
+            if not ok:
+                break
+            vis, analytics, _ = pipe.process(frame, video_t0 + pos_ms / 1000.0, fps_display=reader.fps)
+            jpeg, rec = encode_jpeg(vis), replay_cache.ui_record(analytics)
+            writer.add(jpeg, rec)
+            done += 1
+            ui.show(jpeg, rec)
+            now = time.perf_counter()
+            if now - last_status >= PANEL_REFRESH_S:
+                last_status = now
+                speed = done / (now - started)
+                text = (f"Analysing {done}/{total or '?'} frames · {speed:.1f} fps — "
+                        f"the next Play replays this clip at {reader.fps:.0f} fps")
+                status_placeholder.progress(min(1.0, done / total) if total else 0.0, text=text)
+        if done:
+            ui.show(jpeg, rec, force=True)
+            writer.commit()
+            status_placeholder.success(f"Analysis saved ({done} frames). Press Play again to replay it at "
+                                       f"{reader.fps:.0f} fps.")
+        st.info("Flux vidéo terminé.")
+    finally:
+        writer.abort()  # no-op after commit(); drops the partial recording if playback was interrupted
+        reader.release()
+        pipe.close()
+
+
+def run_dashboard():
+    if not os.path.exists(config_file):
+        st.error(f"Fichier de configuration '{config_file}' introuvable.")
+        return
+    if "Scénario" in source_type:
+        run_simulation()
+    elif "Webcam" in source_type:
+        run_live()
+    elif not video_path or not os.path.exists(video_path):
+        st.warning("Vidéo introuvable ou non sélectionnée.")
+    else:
+        run_video(video_path)
 
 
 if st.session_state.playing:
